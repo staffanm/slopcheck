@@ -52,8 +52,18 @@ test('real model: Swedish evaluation, asset cache, and local-only inference', as
   expect(warm.status).toBe('supported');
 });
 
-test('real model: guarantee claim and lower-court attribution regressions', async ({ page }, testInfo) => {
-  test.setTimeout(120000);
+// A label is wrong when it points the reader the wrong way. A correct claim
+// must never read as contradicted or unsupported; a misleading, incorrect or
+// nonsensical claim must never read as supported. Abstention is always allowed.
+const FORBIDDEN = {
+  correct: ['contradiction', 'missing'],
+  misleading: ['supported'],
+  incorrect: ['supported'],
+  nonsensical: ['supported', 'contradiction'],
+};
+
+test('real model: corpus claims about statutes and judgments never receive a wrong label', async ({ page }, testInfo) => {
+  test.setTimeout(600000);
   const inputs = await Promise.all(legalCases.map(async item => ({ ...item,
     markdown: await readFile(new URL(`./fixtures/legal-sources/${item.file}`, import.meta.url), 'utf8'),
   })));
@@ -70,20 +80,29 @@ test('real model: guarantee claim and lower-court attribution regressions', asyn
       const blocks = [{ id: 'text', text: item.text }];
       const claim = semanticClaim(occurrence, claimContext(occurrence, blocks), blocks);
       const evidence = selectEvidence(item.markdown, item.uri, claim);
-      results.push({ id: item.id, claim, evidence, result: await client.assess(claim, evidence, new AbortController().signal) });
+      const began = performance.now();
+      const result = claim.assessable ? await client.assess(claim, evidence, new AbortController().signal) : { status: 'unassessable', reason: claim.reason, comparisons: [] };
+      results.push({ id: item.id, kind: item.kind, defect: item.defect, known_gap: item.known_gap, ms: performance.now() - began, claim, evidence, result });
     }
     client.stop();
     return results;
   }, inputs);
   await testInfo.attach('legal-claim-results.json', { body: JSON.stringify(results, null, 2), contentType: 'application/json' });
-  for (const { claim, result } of results) {
-    expect(claim.assessable).toBe(true);
-    expect(result.comparisons.length).toBeGreaterThan(0);
-    expect(result.status).not.toBe('supported');
-    expect(result.reason).not.toContain('sammanhang som inte kunde avgränsas');
+  await writeFile(testInfo.outputPath('legal-claim-results.json'), JSON.stringify(results, null, 2) + '\n');
+  expect(results).toHaveLength(legalCases.length);
+  for (const { id, kind, result } of results) {
+    expect(FORBIDDEN[kind], `${id}: ${result.status} (${result.reason})`).not.toContain(result.status);
+    expect(result.reason, id).not.toContain('sammanhang som inte kunde avgränsas');
   }
+  // The two originally reported claims keep their attribution behaviour.
   const judgment = results.find(item => item.id === 'lower-court');
+  expect(judgment.result.comparisons.length).toBeGreaterThan(0);
   expect(judgment.result.comparisons.every(p => p.court === 'högsta domstolen')).toBe(true);
   expect(judgment.result.comparisons.some(p => p.role === 'summary')).toBe(true);
   expect(judgment.result.comparisons.some(p => p.role === 'decision')).toBe(true);
+  expect(results.find(item => item.id === 'guarantee').result.comparisons.length).toBe(2);
+  // Every assessable judgment claim compares only the attributed court's own text.
+  for (const { id, evidence, result } of results.filter(item => item.evidence.authority && item.result.comparisons.length)) {
+    expect(result.comparisons.every(p => p.court === evidence.authority), id).toBe(true);
+  }
 });

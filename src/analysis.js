@@ -111,10 +111,13 @@ export function provisionText(markdown, uri) {
   if (!provision) return { text: markdown, exact: false };
   let text = markdown;
   if (provision[1]) {
-    const chapters = [...text.matchAll(/^#{1,6} .*$/gm)];
-    const index = chapters.findIndex(match => match[0].includes(`#K${provision[1]})`));
+    const headings = [...text.matchAll(/^(#{1,6}) .*$/gm)];
+    const index = headings.findIndex(match => match[0].includes(`#K${provision[1]})`));
     if (index < 0) return { text: markdown, exact: false };
-    text = text.slice(chapters[index].index, chapters[index + 1]?.index ?? text.length);
+    // A chapter runs to the next heading of its own level or higher; the
+    // sub-headings some statutes print inside a chapter stay within it.
+    const end = headings.slice(index + 1).find(match => match[1].length <= headings[index][1].length);
+    text = text.slice(headings[index].index, end?.index ?? text.length);
   }
   const paragraphs = [...text.matchAll(/^\*\*(\d+\s*[a-z]?) §\*\*/gm)];
   const index = paragraphs.findIndex(match => match[1].replace(/\s/g, '') === provision[2]);
@@ -128,21 +131,31 @@ function courtName(heading) {
   if (/^(?:[\p{L} -]+ )?(?:tingsrätt|hovrätt|förvaltningsrätt|kammarrätt)(?:en)?(?: över [\p{L} ]+)?$/iu.test(heading)) return heading.toLocaleLowerCase('sv');
 }
 
-function sourceParagraphs(markdown) {
-  let court;
+// The reporting court behind a judgment uri: the court whose own text a
+// referat's headnote summarizes, and the only court an HFD report names.
+const REPORTING_COURT = { nja: 'högsta domstolen', hfd: 'högsta förvaltningsdomstolen' };
+
+function sourceParagraphs(markdown, reportingCourt) {
+  let court = reportingCourt;
   let section = '';
+  // A referat opens with its title and headnote, the reporting court's own
+  // summary of the holding. Narrative before the first section heading
+  // reports the case history.
   let role = 'unknown';
+  let headnote = false;
   let group = 0;
   const paragraphs = [];
   for (const block of markdown.split(/\n\s*\n/).filter(Boolean)) {
-    const heading = /^#{1,6} (.+)$/.exec(block.trim());
+    const heading = /^(#{1,6}) (.+)$/.exec(block.trim());
     if (heading) {
-      section = plainText(heading[1]);
+      section = plainText(heading[2]);
       const namedCourt = courtName(section);
-      if (namedCourt) { court = namedCourt; role = 'unknown'; }
-      else if (/^(?:sammanfattning|slutsatser)$/i.test(section)) role = 'summary';
-      else if (/^(?:(?:hovrättens|tingsrättens|HD:s|HFD:s) )?(?:domslut|beslut|avgörande)$/i.test(section)) role = 'decision';
+      if (heading[1] === '#') { role = reportingCourt ? 'summary' : 'unknown'; headnote = Boolean(reportingCourt); }
+      else if (namedCourt) { court = namedCourt; role = 'unknown'; }
+      else if (/^(?:sammanfattning|sammanfattande (?:slutsatser|bedömning)|slutsatser?)$/i.test(section)) role = 'summary';
+      else if (/^(?:(?:hovrättens|tingsrättens|HD:s|HFD:s|högsta domstolens|högsta förvaltningsdomstolens) )?(?:domslut|beslut|avgörande)$/i.test(section)) role = 'decision';
       else if (/bakgrund|parternas|yrkanden|inställning|betänkande|skiljaktig/i.test(section)) role = 'reported';
+      else if (/^(?:mål nr|föredraget)/i.test(section)) role = 'metadata';
       else if (court) role = 'reasoning';
       group++;
       continue;
@@ -150,10 +163,29 @@ function sourceParagraphs(markdown) {
     const text = plainText(block);
     // A court section can itself report another speaker's position. Such
     // passages must not establish what this court decided.
-    const reported = /^(?:\d+\.\s*)?(?:käranden|svaranden|åklagaren|riksåklagaren|föredraganden|tingsrätten|hovrätten)\b.{0,120}\b(?:yrkade|anförde|hävdade|har dömt|har ansett|föreslog)/iu.test(text);
-    paragraphs.push({ text, court, section, role: reported ? 'reported' : role, group });
+    const reported = /^(?:\d+\.\s*)?(?:käranden|svaranden|åklagaren|riksåklagaren|föredraganden|tingsrätten|hovrätten|förvaltningsrätten|kammarrätten|skatteverket)\b.{0,120}\b(?:yrkade|anförde|hävdade|har dömt|har ansett|föreslog|yttrade|medgav|vidhöll)/iu.test(text);
+    // The trailer of a referat lists the decision date, case number, cited
+    // provisions and cases. It is not the court's own text.
+    const metadata = /^(?:HD:s (?:dom|beslut) meddelad|Mål nr|Lagrum|Rättsfall|Litteratur|Sökord)\b/i.test(text);
+    paragraphs.push({ text, court, section, role: metadata ? 'metadata' : reported ? 'reported' : role, group });
+    if (headnote) { role = 'reported'; headnote = false; }
   }
   return paragraphs;
+}
+
+// One provision as the units a sentence-pair model can judge: each stycke,
+// a list joined to its lead-in, and the sentences of any stycke longer than
+// a few lines. A whole multi-paragraph provision as one premise scores at
+// chance (see docs/semantic-evaluation.md).
+function provisionUnits(plain) {
+  const units = [];
+  for (const block of plain.split(/\n\s*\n/).filter(Boolean)) {
+    if (units.length && /^(?:\d+[.)]|[a-z][.)]|[-–•])\s/.test(block)) units[units.length - 1] += '\n\n' + block;
+    else units.push(block);
+  }
+  return units.flatMap(unit => unit.length <= 400 || /\n\n(?:\d+[.)]|[a-z][.)]|[-–•])\s/.test(unit) ? [unit]
+    : [...new Intl.Segmenter('sv', { granularity: 'sentence' }).segment(unit)].map(item => item.segment.trim()).filter(Boolean))
+    .map((text, index) => ({ text, group: 0, index }));
 }
 
 function passageChunks(paragraphs) {
@@ -182,10 +214,10 @@ export function selectEvidence(markdown, uri, claim) {
   const scope = provisionText(markdown, uri);
   const plain = plainText(scope.text);
   const judgment = new URL(uri).pathname.startsWith('/dom/');
-  const paragraphs = scope.exact && plain.length <= 1400 ? [{ text: plain, group: 0 }] : sourceParagraphs(scope.text);
+  const paragraphs = scope.exact ? provisionUnits(plain) : sourceParagraphs(scope.text, judgment ? REPORTING_COURT[new URL(uri).pathname.split('/')[2]] : undefined);
   const terms = new Set(words(claim.hypothesis ?? claim.text));
   const quotes = [...claim.text.matchAll(/[“”"«']([^“”"»']{20,})[“”"»']/g)].map(match => normalizeQuote(match[1]));
-  const ranked = passageChunks(paragraphs).map(passage => {
+  const ranked = (scope.exact ? paragraphs : passageChunks(paragraphs)).map(passage => {
     const tokens = new Set(words(passage.text));
     const quote = quotes.some(q => normalizeQuote(passage.text).includes(q));
     return { ...passage, quote, score: [...terms].filter(term => tokens.has(term)).length / Math.sqrt(tokens.size || 1) + (quote ? 100 : 0) };
@@ -195,7 +227,7 @@ export function selectEvidence(markdown, uri, claim) {
     return { passages, exact: scope.exact, quote: passages.some(p => p.quote) };
   }
   const courts = [...new Set(paragraphs.map(p => p.court).filter(Boolean))];
-  const authority = claim.authority ?? courts.at(-1);
+  const authority = claim.authority ?? REPORTING_COURT[new URL(uri).pathname.split('/')[2]] ?? courts.at(-1);
   const matchesCourt = court => court === authority || (authority === 'tingsrätten' && /tingsrätt(?:en)?$/.test(court ?? '')) || (authority === 'hovrätten' && /hovrätt/.test(court ?? ''));
   const eligible = ranked.filter(p => matchesCourt(p.court) && ['reasoning', 'summary', 'decision'].includes(p.role));
   // Reserve room for the court's conclusion even if earlier narrative matches

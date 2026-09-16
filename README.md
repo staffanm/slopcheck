@@ -171,11 +171,52 @@ Conflicting evidence, long inputs, ambiguous attribution, and model failures cau
 Exact quote matches remain separate from semantic support.
 
 Claim extraction recognizes clauses such as “som stadgar att …” and explicit court attribution.
-For judgments, source selection retains court and section headings. It excludes other courts and identified reported statements.
+For judgments, source selection retains court and section headings. It excludes other courts, identified reported statements, and trailer lines such as Lagrum and Rättsfall.
+The headnote of a referat counts as the reporting court's summary. A report without court headings, such as an HFD referat, is read as the reporting court's own text.
 Claims about what a court holds require supporting evidence in its summary or decision before receiving “Stöd hittat”.
-Missing court headings cause abstention. This rule does not resolve every instance of quoted or reported speech.
+This rule does not resolve every instance of quoted or reported speech.
+A statute provision is compared one stycke or sentence at a time. A whole multi-paragraph provision as one premise scores at chance with the small model.
 The two reported legal examples now reach the model. Both still produce abstention; neither receives a confident error label.
 
 Model files stay cached when the document is cleared. Clear site data to remove those files.
 Changing the model requires an export version change, new hashes, and a fresh evaluation.
 See [the evaluation and release limits](docs/semantic-evaluation.md).
+
+## Plan: a more capable model server-side
+
+The local model is too small for the job. On the 70-claim corpus fixture it labels 9 claims and
+abstains on 55. It cannot tell “fem år” from “tio år” with confidence, and it reads an
+exception stycke as a contradiction of the main rule. See
+[the evaluation](docs/semantic-evaluation.md). A larger NLI model fixes part of this.
+A larger model does not fit the browser: mDeBERTa-v3-base XNLI is about 280 MB quantized,
+ten times the current download.
+
+The plan is a slopcheck-specific inference service, not a lagen.nu API:
+
+1. **Model.** [mDeBERTa-v3-base-xnli-multilingual-nli-2mil7](https://huggingface.co/MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7),
+   exported to ONNX with int8 weights the same way `scripts/export-model.py` exports the small model.
+   About 86M encoder parameters and a 190M-parameter embedding table; about 600 MB resident in int8.
+   Evaluate it on `test/fixtures/legal-claims.json` before anything else. If it does not beat the
+   small model on that fixture, stop here.
+2. **Service.** One container on ludo.tomtebo.org beside the static site, `slopcheck-nli`, running
+   ONNX Runtime on CPU. One endpoint, `POST /nli`, that takes a list of premise/hypothesis pairs and
+   returns the three scores per pair. No document text, no citation, no session: the browser still
+   extracts the claim and selects the passages, and sends only those pairs. The service keeps no log
+   of request bodies. The host nginx proxies `slopcheck.tomtebo.org/nli` to it, same certificate.
+3. **Cost.** Ludo has 3 virtual Broadwell cores with AVX2 and FMA, 7 GB of RAM, and 124 GB free disk,
+   shared with the paragraf and paratext containers. A 512-token pair costs roughly 0.4 to 0.8 seconds
+   quantized on one core; the passages the browser now selects are mostly under 128 tokens, which is
+   four to eight times cheaper. A ten-citation document with five passages each is 50 pairs, so
+   expect 5 to 30 seconds per check. Run one worker with a request queue and a 60-second timeout.
+   Measure before deciding whether that is acceptable; the numbers above are estimates, not benchmarks.
+4. **Client.** A third mode beside default and local privacy mode: “server comparison”. The mode
+   selector states what leaves the browser. In local privacy mode the small model stays the only option.
+   The label policy, thresholds and the label rule in the tests apply unchanged to the server scores;
+   thresholds are recalibrated on the fixture for the new model, and the recorded results in `docs/`
+   are regenerated per model.
+5. **Deterministic checks first.** A number check does not need a model: extract quantities with a
+   unit (år, veckor, månader, dagar, procentenheter, kr) from the claim and the provision, and report a
+   differing number as its own finding. Eight of the 25 incorrect fixture claims are wrong numbers.
+   This ships before the service, in the browser, and applies to both models.
+
+Not in the plan: exposing the service under lagen.nu, GPU hosting, or a generative model as judge.

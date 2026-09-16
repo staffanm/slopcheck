@@ -33,8 +33,9 @@ The calibration examples support provisional thresholds of 0.97 for support and 
 and 0.90 for neutral evidence. These values favor abstention over coverage.
 The same values apply to the separate test examples; they were not lowered to improve test recall.
 
-A support or contradiction signal of at least 0.20 conflicts with the opposite signal.
-Conflicting passages produce abstention. Incomplete input also produces abstention.
+A strong support or contradiction signal stands only when no other compared passage gives
+the opposite label at 0.50 or more. Such conflicting passages produce abstention.
+Incomplete input also produces abstention.
 All compared passages must exceed the neutral threshold to show “Support not found.”
 A quote match never sets a semantic support label by itself.
 
@@ -60,28 +61,95 @@ These short examples use one passage each. This is not the PRD's full ten-citati
 Physical WebGPU performance and memory behavior on mobile devices remain unmeasured.
 The browser tries WebGPU and recovers locally through WASM if GPU initialization or inference fails.
 
-## Reported legal claims
+## Corpus claims about statutes and judgments
 
-The [legal fixtures](../test/fixtures/legal-claims.json) preserve both reported examples.
-They use the complete 4 § avtalslagen and the NJA 2013 s. 502 report.
+The [legal fixtures](../test/fixtures/legal-claims.json) hold 70 claims against 14 real source texts
+from the lagen.nu corpus: nine statute provisions and five judgments.
 [Source provenance](../test/fixtures/legal-sources/README.md) records their origin.
+Each claim carries a `kind`:
 
-The guarantee example now extracts the complete claim after “som stadgar att”.
-It no longer stops at the introductory “Detta”. Both paragraphs of the provision stay together.
-The model still fails to identify the unrelated subject confidently. It abstains with scores of
-0.599 support, 0.226 neutral, and 0.175 contradiction.
+| Kind | Claims | Meaning | Example |
+|---|---:|---|---|
+| correct | 24 | the source says this | 18 kap. 1 § RB: the losing party pays the other side's costs, om inte annat är stadgat |
+| misleading | 13 | true in part; a condition, exception or scope is dropped or widened | 2 § preskriptionslagen: “alla fordringar tio år”, denying the three-year consumer rule |
+| incorrect | 25 | a wrong number, a reversed outcome, the opposite rule, a true rule attributed to the wrong source, or a holding attributed to a court that did not make it | NJA 2005 s. 805: “pastorn ska dömas … till fängelse” (HD acquitted) |
+| nonsensical | 8 | a category error, word salad, a citation list, or keywords without a verb | “3 kap. 1 § brottsbalken slog fast att hovrätten är ett mord” |
 
-The HD example now records the attributed court separately from the claim.
-Selection retains court and section labels and excludes lower-court passages from inference.
-It reserves space for HD's summary and decision, even when earlier passages share more words.
-Explicit claims about a court's holding need supporting summary or decision evidence to receive “Stöd hittat”.
-The reported example abstains because the selected passages give conflicting signals.
-Its maximum support score is 0.691; its maximum contradiction score is 0.407.
+Eight claims exist in two wordings, the second with the `-verb` suffix. The first run of the
+fixture found the natural wording unassessable because the claim verb list lacked `preskriberas`,
+`beräknas`, `omfattar`, `dömde` and `skulle`. Both wordings are assessable now, and the pair
+doubles as a paraphrase check. One claim keeps a `known_gap`: “preskriberas en fordran fem år
+efter tillkomsten” has five content words, and the claim rule needs six.
 
-[Recorded legal outputs](legal-claim-results.json) contain the actual hypotheses, passages, and model scores.
-These results come from Chromium with WASM on 16 September 2026. Thresholds remain unchanged.
-Neither example receives a confident error label. The claim-extraction and attribution fixes do not establish reliable legal reasoning.
-Tests also check that matching lower-court text stays excluded and that supporting conclusions can still pass the label policy.
+### Label rule the tests enforce
+
+A label is wrong when it points the reader the wrong way. The browser test therefore forbids
+“Möjlig motsägelse” and “Stöd inte hittat” for a correct claim, “Stöd hittat” for a misleading or
+incorrect claim, and both “Stöd hittat” and “Möjlig motsägelse” for a nonsensical claim.
+Abstention and unassessable are always allowed. Unit tests check the deterministic layer:
+the hypothesis never contains the citation, provision claims select exactly the cited provision,
+and judgment claims compare only the attributed court's own text and always include its decision.
+
+### What the first run showed, and what changed
+
+The first run on 16 September 2026 gave 4 substantive labels on 62 assessable claims,
+all correct. The abstentions had four causes. Each got a fix the same day:
+
+- **Long premises.** A provision longer than about 600 characters as one premise scored near
+  one third for every label, whatever the claim said. `selectEvidence` now splits an exact provision
+  into units: each stycke, a list joined to its lead-in, and the sentences of any stycke over 400
+  characters. The claim is compared against the best-ranked units.
+- **Cross-passage conflict.** Every judgment claim abstained because some irrelevant passage
+  scored 0.2 contradiction while another scored 0.2 entailment. The rule now blocks a strong signal
+  only when another passage gives the opposite label at 0.50 or more.
+- **Unused headnote, HFD reports, trailers.** The headnote of a referat sits under no court
+  heading and was never compared. It now counts as the reporting court's summary, and the reporting
+  court is read from the uri (`/dom/nja/` is HD, `/dom/hfd/` is HFD). HFD reports, which have no
+  court headings at all, therefore get their Skälen för avgörandet and Högsta förvaltningsdomstolens
+  avgörande as reasoning and decision. Trailer lines (HD:s dom meddelad, Mål nr, Lagrum, Rättsfall)
+  are metadata and never compared. Chapter selection stops at the next heading of the chapter's own
+  level, so 2 kap. 1 § tryckfrihetsförordningen is found under its sub-headings.
+- **Claim verb list.** Forty more finite verbs, plus any word ending in -as, -ade or -ades.
+
+### Browser results, 16 September 2026, after the changes
+
+[Recorded outputs](legal-claim-results.json) come from Chromium with WASM on this host.
+The 64 assessable claims took 15.5 seconds after the model had loaded.
+
+| Kind | Claims | Supported | Contradiction | Missing | Abstain | Unassessable |
+|---|---:|---:|---:|---:|---:|---:|
+| correct | 24 | 7 | 0 | 0 | 17 | 0 |
+| misleading | 13 | 0 | 1 | 0 | 12 | 0 |
+| incorrect | 25 | 0 | 1 | 0 | 23 | 1 |
+| nonsensical | 8 | 0 | 0 | 0 | 4 | 4 |
+
+No claim receives a wrong label. Seven correct statute claims receive “Stöd hittat”
+(4 § avtalslagen, 2 kap. 1 § skadeståndslagen, 50 kap. 1 § and 18 kap. 1 § rättegångsbalken,
+3 kap. 1 § brottsbalken, 32 § köplagen, 2 kap. 1 § tryckfrihetsförordningen).
+Two claims receive “Möjlig motsägelse”: the incorrect claim that the three-year limitation period
+covers löpande skuldebrev, against the sentence that excludes them (0.98), and the misleading claim
+that a sermon can never be hets mot folkgrupp, against the headnote of NJA 2005 s. 805 (0.98).
+Judgment claims still abstain, but no longer on conflicting signals. The headnote is now the
+best-scoring passage for the NJA 2013 s. 502 claims and for the correct NJA 2020 s. 1042 claim
+(0.96). The correct HFD 2013 ref. 71 claim reaches 0.95 on HFD's own reasoning.
+
+The threshold still does the work. Scores just under it:
+
+| Claim | Kind | Entailment | Blocked by |
+|---|---|---:|---|
+| oskäliga avtalsvillkor får jämkas eller lämnas utan avseende (36 § AvtL) | correct | 0.98 | a later stycke contradicts at 0.53 |
+| tre år för en näringsidkares fordran mot en konsument (2 § PreskL) | correct | 0.97 | rounding: 0.9699 |
+| en part som vinner mot en av två motparter har rätt till full ersättning (NJA 2020 s. 1042) | correct | 0.96 | threshold |
+| huvudregeln är tio år (2 § PreskL) | correct | 0.95 | the three-year stycke contradicts at 0.80 |
+| det svenska systemet … är förenligt med Europakonventionen (NJA 2013 s. 502) | incorrect | 0.88 | threshold |
+| överklagandet kan göras muntligen vid tingsrätten (50 kap. 1 § RB) | incorrect | 0.87 | threshold |
+
+The model reads an exception stycke as contradicting the main rule it qualifies, so a correct
+claim about the main rule abstains. That is the price of the 0.50 conflict rule, and it is the
+right side to err on. The two originally reported claims still abstain: the guarantee claim at
+0.36 support, the lower-court claim at 0.69.
+These results do not establish reliable legal reasoning. They show that the label policy
+holds on 64 realistic claims, and that the deterministic layer no longer hides the model.
 
 ## Reproduce
 

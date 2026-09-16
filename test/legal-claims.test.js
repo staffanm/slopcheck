@@ -5,6 +5,8 @@ import cases from './fixtures/legal-claims.json' with { type: 'json' };
 import { claimContext, selectEvidence, plainText } from '../src/analysis.js';
 import { semanticClaim, semanticResult } from '../src/semantic.js';
 
+const KINDS = ['correct', 'misleading', 'incorrect', 'nonsensical'];
+
 function input(item) {
   const start = item.text.indexOf(item.citation);
   const occurrence = { text: item.citation, locations: [{ block_id: 'text', start, end: start + item.citation.length }] };
@@ -21,8 +23,8 @@ test('a provision-relative claim keeps the complete guarantee assertion and both
   assert.match(claim.hypothesis, /'som för egen skuld'.*direkt från borgensmannen\.$/);
   assert.equal(claim.text, cases[0].text);
   assert.doesNotMatch(claim.hypothesis, /Detta följer|avtalslagen/);
-  assert.equal(evidence.passages.length, 1);
-  assert.equal(evidence.passages[0].text, plainText(markdown));
+  assert.equal(evidence.passages.length, 2);
+  assert.equal(evidence.passages.toSorted((a, b) => a.index - b.index).map(p => p.text).join('\n\n'), plainText(markdown));
   assert.equal(evidence.exact, true);
 });
 
@@ -57,4 +59,55 @@ test('source passages preserve long sentences instead of cutting off their condi
   const text = 'En part ska betala ' + 'ett belopp '.repeat(160) + 'bara om avtalet är giltigt.';
   const evidence = selectEvidence(text, 'https://lagen.nu/1915:218', { text: 'En part ska betala ett belopp.' });
   assert.equal(evidence.passages[0].text, text);
+});
+
+test('every corpus claim has a kind, a frozen source, and a hypothesis without the citation', () => {
+  assert.ok(cases.length >= 60);
+  assert.equal(new Set(cases.map(item => item.id)).size, cases.length);
+  for (const kind of KINDS) assert.ok(cases.filter(item => item.kind === kind).length >= 5, kind);
+  for (const item of cases) {
+    assert.ok(KINDS.includes(item.kind), item.id);
+    assert.ok(item.text.includes(item.citation), item.id);
+    const { claim } = input(item);
+    assert.doesNotMatch(claim.hypothesis, /CITATION/, item.id);
+    assert.equal(claim.hypothesis.includes(item.citation), false, item.id);
+    if (item.known_gap) continue;
+    assert.equal(claim.assessable, item.assessable !== false, `${item.id}: ${claim.reason}`);
+  }
+});
+
+test('provision claims select the exact provision; judgment claims select the attributed court', () => {
+  for (const item of cases.filter(item => !item.known_gap)) {
+    const { claim, markdown, evidence } = input(item);
+    if (!new URL(item.uri).pathname.startsWith('/dom/')) {
+      assert.equal(evidence.exact, true, item.id);
+      assert.ok(evidence.passages.length >= 1 && evidence.passages.length <= 5, item.id);
+      assert.ok(evidence.passages.every(p => plainText(markdown).includes(p.text)), item.id);
+      assert.ok(evidence.passages.some(p => new RegExp(`^${new URL(item.uri).hash.replace(/^#(?:K\d+[a-z]?)?P/, '')} §`).test(p.text)), item.id);
+      continue;
+    }
+    assert.ok(evidence.passages.length > 0, item.id);
+    assert.equal(evidence.authority, claim.authority ?? (item.uri.includes('/dom/hfd/') ? 'högsta förvaltningsdomstolen' : 'högsta domstolen'), item.id);
+    assert.ok(evidence.passages.every(p => p.court === evidence.authority), item.id);
+    assert.ok(evidence.passages.some(p => p.role === 'decision'), item.id);
+    assert.equal(claim.requireConclusion, Boolean(claim.authority), item.id);
+  }
+});
+
+test('the headnote, HFD reports and sub-headed chapters supply evidence', () => {
+  const [tf, hfd, hd] = ['public-access-everyone', 'tax-surcharge-after-charge', 'sermon-acquitted'].map(id => input(cases.find(item => item.id === id)));
+  assert.equal(tf.evidence.exact, true);
+  assert.equal(tf.evidence.passages.length, 1);
+  assert.equal(hfd.evidence.authority, 'högsta förvaltningsdomstolen');
+  assert.ok(hfd.evidence.passages.every(p => p.court === 'högsta förvaltningsdomstolen'));
+  assert.ok(hfd.evidence.passages.some(p => p.role === 'summary' && p.text.startsWith('När en skattskyldig har åtalats')));
+  assert.ok(hfd.evidence.passages.some(p => p.role === 'decision' && p.text.includes('undanröjer skattetilläggen')));
+  assert.ok(hfd.evidence.excluded.every(p => p.role === 'reported'));
+  assert.ok(hd.evidence.passages.some(p => p.role === 'summary' && p.text.includes('har ogillats med hänvisning till Europakonventionen')));
+  assert.ok(hd.evidence.passages.some(p => p.role === 'decision' && p.text.includes('fastställer hovrättens domslut')));
+  for (const twin of cases.filter(item => item.id.endsWith('-verb'))) {
+    const original = cases.find(item => `${item.id}-verb` === twin.id);
+    assert.equal(input(twin).claim.assessable, true, twin.id);
+    assert.equal(input(original).claim.assessable, !original.known_gap, original.id);
+  }
 });

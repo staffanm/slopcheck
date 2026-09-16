@@ -91,8 +91,9 @@ test('quote matching and ranking remain separate from semantic support', () => {
   const evidence = selectEvidence(markdown, 'https://lagen.nu/1915:218#P4', { text: 'Här står ”Antagande svar, som för sent kommer anbudsgivaren till handa, skall gälla såsom nytt anbud.”', assessable: true });
   assert.equal(evidence.quote, true);
   assert.equal(evidence.exact, true);
-  assert.equal(evidence.passages.length, 1);
+  assert.equal(evidence.passages.length, 2);
   assert.match(evidence.passages[0].text, /^4 § Antagande/);
+  assert.equal(evidence.passages[1].quote, false);
   assert.ok(evidence.passages.every(p => p.text.length <= 1400));
   assert.equal(normalizeQuote('”borgens-\nmannen”  får'), 'borgensmannen får');
 });

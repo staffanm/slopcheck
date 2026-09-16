@@ -10,7 +10,7 @@ export const SEMANTIC = {
 };
 
 // Provisional precision-first thresholds. See docs/semantic-evaluation.md.
-export const THRESHOLDS = { supported: 0.97, contradiction: 0.97, neutral: 0.90, conflict: 0.20 };
+export const THRESHOLDS = { supported: 0.97, contradiction: 0.97, neutral: 0.90, conflict: 0.50 };
 
 export function semanticClaim(occurrence, context, blocks) {
   let hypothesis = extractionText(context.text).text;
@@ -47,7 +47,8 @@ export function semanticClaim(occurrence, context, blocks) {
   else if (hypothesis.length > 1600) reason = 'Påståendet är för långt för en säker jämförelse.';
   else if (/^(?:han|hon)\b|^(?:detta|det|den|de)\s+(?:är|var|ska|kan|gäller|följer|innebär)\b/i.test(hypothesis)) reason = 'Påståendet hänvisar till ett sammanhang som inte kunde avgränsas.';
   else if ((hypothesis.match(/\p{L}{3,}/gu)?.length ?? 0) < 6
-    || !/(?<!\p{L})(?:är|var|vara|har|hade|ska|skall|kan|får|måste|gäller|gällde|ansvarar|kräver|innebär|utgör|blir|blev|ger|anges|sägs|framgår|står|fann|ansåg|ogillade|biföll|hindrar|fälls|medför|följer|saknar|förutsätter)(?!\p{L})/iu.test(hypothesis)) {
+    || !/(?<!\p{L})(?:är|var|vara|har|hade|ska|skall|kan|får|måste|gäller|gällde|ansvarar|kräver|innebär|utgör|blir|blev|ger|anges|sägs|framgår|står|fann|ansåg|ogillade|biföll|hindrar|fälls|medför|följer|saknar|förutsätter|skulle|bör|borde|döms|dömas|dömde|dömdes|omfattar|omfattas|avser|avses|krävs|finner|anser|bedömer|bedömde|avslog|avslår|bifaller|undanröjde|undanröjer|fastställde|fastställer|ogillar|ogillas|konstaterade|uttalade|tillåter|hindrade|hindrar|påförs|påfördes|föreligger|uppkommer|betalas|upphör|förbjuder|räknas|ersätts|tillämpas|prövas|prövade|beviljas|meddelas|träder)(?!\p{L})/iu.test(hypothesis)
+    && !/(?<!\p{L})\p{L}{3,}(?:as|ade|ades)(?!\p{L})/iu.test(hypothesis)) {
     reason = 'Inget avgränsat påstående kunde skiljas från hänvisningen.';
   }
   // A small NLI model cannot safely resolve nested speech or who endorsed it.
@@ -64,23 +65,26 @@ export function scoresFromLogits(logits) {
   return Object.fromEntries(['entailment', 'neutral', 'contradiction'].map((label, index) => [label, exps[index] / total]));
 }
 
-export function semanticResult(comparisons, { incomplete = false, requireConclusion = false } = {}) {
-  if (!comparisons.length) return { status: 'abstain', reason: 'Inga källavsnitt ryms i modellens textgräns.', comparisons };
+export function semanticResult(comparisons, { incomplete = false, requireConclusion = false, reason: empty } = {}) {
+  if (!comparisons.length) return { status: 'abstain', reason: empty ?? 'Inga källavsnitt ryms i modellens textgräns.', comparisons };
   const best = label => comparisons.reduce((a, b) => a.scores[label] >= b.scores[label] ? a : b);
   const support = best('entailment');
   const conflict = best('contradiction');
+  const strongSupport = support.scores.entailment >= THRESHOLDS.supported;
+  const strongConflict = conflict.scores.contradiction >= THRESHOLDS.contradiction;
   let status = 'abstain';
   let evidence = support;
   let reason = SEMANTIC.abstain[1];
   if (incomplete) reason = 'Alla utvalda avsnitt kunde inte jämföras. Texten är för lång.';
-  else if (support.scores.entailment >= THRESHOLDS.conflict && conflict.scores.contradiction >= THRESHOLDS.conflict) {
+  // A strong signal stands only when no other passage mostly says the opposite.
+  else if ((strongSupport && conflict.scores.contradiction >= THRESHOLDS.conflict) || (strongConflict && support.scores.entailment >= THRESHOLDS.conflict)) {
     reason = 'Källavsnitten ger motstridiga signaler.';
-  } else if (support.scores.entailment >= THRESHOLDS.supported) {
+  } else if (strongSupport) {
     const conclusion = comparisons.find(item => ['summary', 'decision'].includes(item.role) && item.scores.entailment >= THRESHOLDS.supported);
     if (requireConclusion && !conclusion) reason = 'Modellen hittar liknande text, men kan inte bekräfta påståendet i domstolens sammanfattning eller avgörande.';
     else { status = 'supported'; evidence = conclusion ?? support; }
   }
-  else if (conflict.scores.contradiction >= THRESHOLDS.contradiction) {
+  else if (strongConflict) {
     status = 'contradiction';
     evidence = conflict;
   } else if (comparisons.every(item => item.scores.neutral >= THRESHOLDS.neutral)) status = 'missing';
