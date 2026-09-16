@@ -1,7 +1,7 @@
 # slopcheck
 
 A static JavaScript app for Phases 1 and 2 of
-[`PRD-juridisk-hanvisningskontroll.md`](../PRD-juridisk-hanvisningskontroll.md).
+[`PRD-juridisk-hanvisningskontroll.md`](../ferenda/PRD-juridisk-hanvisningskontroll.md).
 The service name is **slopcheck**.
 
 ## Run
@@ -123,6 +123,9 @@ npm test
 npx playwright install chromium
 npm run test:browser
 ```
+
+The parser parity tests use fixtures from the sibling `../ferenda` checkout.
+The `export:lagrum` command also reads that checkout.
 
 To use an existing Chromium executable, set `CHROMIUM_PATH`.
 Browser tests mock API responses. The semantic evaluation uses the actual local model.
