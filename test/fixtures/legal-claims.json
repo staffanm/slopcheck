@@ -1,0 +1,16 @@
+[
+  {
+    "id": "guarantee",
+    "text": "Detta följer av svensk rätt, särskilt 4 § avtalslagen (1915:218), som stadgar att när en person åtar sig ett borgensåtagande 'som för egen skuld', dvs. proprieborgen, har borgenären rätt att kräva betalning direkt från borgensmannen.",
+    "citation": "4 § avtalslagen (1915:218)",
+    "uri": "https://lagen.nu/1915:218#P4",
+    "file": "avtalslagen-4.md"
+  },
+  {
+    "id": "lower-court",
+    "text": "Högsta Domstolen har i NJA 2013 s. 502 slagit fast att det förhållandet att en person påförts skattetillägg för ett visst förfarande inte hindrar att han eller hon också fälls till ansvar för bokförings- eller skattebrott",
+    "citation": "NJA 2013 s. 502",
+    "uri": "https://lagen.nu/dom/nja/2013s502",
+    "file": "nja2013s502.md"
+  }
+]

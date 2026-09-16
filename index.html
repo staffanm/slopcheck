@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Kontrollera juridiska hänvisningar med lagen.nu. Läs källorna och granska texten i ditt dokument." />
+    <meta name="referrer" content="no-referrer" />
+    <title>slopcheck — kontrollera juridiska hänvisningar</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+  </head>
+  <body>
+    <a class="skip-link" href="#input">Hoppa till dokumentet</a>
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="slopcheck, startsida"><span class="brand-mark" aria-hidden="true">s<span>✓</span></span>slopcheck<span class="beta">BETA</span></a>
+      <nav aria-label="Huvudmeny"><a href="#about">Så fungerar det <span aria-hidden="true">↗</span></a><a href="https://lagen.nu" target="_blank" rel="noopener noreferrer">Med källor från <strong>lagen.nu</strong> <span aria-hidden="true">↗</span></a></nav>
+    </header>
+    <main>
+      <div class="tool-heading"><h1 id="heading">Kontrollera juridiska hänvisningar</h1><p>slopcheck hittar hänvisningar och kontrollerar dem mot lagen.nu. En lokal språkmodell söker stöd för påståendena. Jämförelsen är experimentell och behöver din granskning.</p></div>
+      <details id="about" class="about"><summary>Så fungerar kontrollen och dess begränsningar</summary><p>PDF och DOCX läses i webbläsaren. Texten skickas till lagen.nu för att hitta hänvisningar och kontrollera källorna. Webbläsaren väljer källavsnitt och söker efter citerade ord. En liten språkmodell jämför påståenden med källavsnitt på din enhet. Dokumenttext skickas aldrig till en modelltjänst.</p><p>En hittad källa betyder inte att påståendet har stöd. Endast lagen.nu kan markera en hänvisning som ogiltig. Ofullständig täckning ger ett obekräftat resultat. Fel i textutvinningen och historiska lydelser kräver egen granskning.</p><p>Täckning kontrollerad 15 september 2026. Fullständiga intervall för referat: NJA 1981–2025, RÅ 1993–2010, HFD 2011–2025, AD 1993–2024, RH 1993–2025, MÖD 1999–2025, MIG 2006–2025, PMÖD 2016–2025, MD 2004–2016 och RK 2008–2025. Intervallen gäller inte notiser eller vanliga målnummer. Svenska lagrum kontrolleras mot den publicerade strukturen.</p><p>Dokumentet sparas inte i webbläsaren. Vanliga åtkomstuppgifter kan registreras hos lagen.nu. Endast modellfiler sparas lokalt. Modell: ScandiNLI small, version 5c7d1ee-q8-v1. Den kan missa undantag, sammanhang och vem som uttalar sig. Resultaten är experimentella. Version 0.2.0 · <a href="https://lagen.nu/docs" target="_blank" rel="noopener noreferrer">API-dokumentation ↗</a></p></details>
+      <details id="input-wrap" class="input-wrap" open><summary>Dokument att kontrollera <span>Ändra text eller välj en ny fil</span></summary>
+      <section id="input" class="input-panel" aria-label="Dokument att kontrollera">
+        <label class="sr-only" for="text">Juridisk text</label><textarea id="text" placeholder="Klistra in juridisk text eller dra en PDF- eller Word-fil hit…" spellcheck="false"></textarea>
+        <div class="text-footer"><span id="character-count">0 / 250 000 tecken</span></div>
+        <div class="file-row"><label for="file" class="text-button">Välj PDF eller Word-fil</label><input id="file" class="sr-only" type="file" accept=".pdf,.docx" /><span id="file-name">eller dra filen till textfältet · högst 25 MB</span><button id="remove-file" class="text-button" hidden>Ta bort filen</button></div>
+        <div class="input-actions">
+          <div class="input-options">
+            <label class="privacy-option" for="local-mode">
+              <input id="local-mode" type="checkbox" />
+              <span>Lokal identifiering <small>(extra integritet: texten lämnar inte webbläsaren)</small></span>
+            </label>
+            <p>Hela filen läses. Högst 250 000 tecken.<br />Skannade dokument behöver OCR före kontrollen.</p>
+          </div>
+          <button id="check" class="primary" disabled>Kontrollera hänvisningar <span aria-hidden="true">↗</span></button>
+        </div>
+      </section>
+      <p id="privacy-note" class="privacy"><span aria-hidden="true">↳</span> Texten skickas till lagen.nu för att hitta hänvisningar. Den behandlas tillfälligt i minnet, tas bort efter behandlingen, sparas aldrig och skickas aldrig vidare. Resultatet skickas endast till dig. Originalfilen stannar på din enhet. Den lokala jämförelsen hämtar cirka 25 MB modellfiler samt körmiljön första gången. Filerna hämtas från denna webbplats och kan återanvändas.</p>
+
+
+      </details>
+      <div id="warnings" class="warnings" hidden></div>
+      <div id="error" class="error" role="alert" hidden></div>
+      <div id="progress" class="progress" hidden><div><span class="spinner" aria-hidden="true"></span><span id="progress-label" role="status" aria-live="polite"></span></div><button id="cancel" class="text-button">Avbryt</button></div>
+
+      <section id="report" class="report" aria-labelledby="report-heading" hidden>
+        <div class="report-heading"><div><h2 id="report-heading">Granska dokumentet</h2><p id="report-meta"></p></div><div class="report-actions"><button id="retry" class="secondary" hidden>Försök igen med misslyckade källor</button><button id="retry-semantic" class="secondary" hidden>Försök igen med lokal jämförelse</button><button id="print" class="secondary">Skriv ut / spara PDF</button><button id="clear" class="text-button">Rensa dokumentet</button></div></div>
+        <div id="summary" class="summary" aria-live="polite"></div>
+        <div class="review-grid">
+          <section class="document-panel" aria-labelledby="document-heading"><div class="document-toolbar"><h3 id="document-heading">Dokumenttext</h3><div class="error-navigation"><button id="previous-error" class="text-button" disabled>← Föregående fel</button><button id="next-error" class="text-button" disabled>Nästa fel →</button></div></div><p class="legend"><span class="legend-found">✓ Hittad källa</span><span class="legend-invalid">× Ogiltig hänvisning</span><span class="legend-unconfirmed">? Obekräftad</span><span class="legend-review">◌ Granska påståendet</span><span>Välj en markering för detaljer.</span></p><div id="document-content"></div></section>
+          <aside class="review-aside" aria-labelledby="aside-heading"><div class="aside-toolbar"><h3 id="aside-heading">Hänvisningar</h3><div class="filter-row"><div><label for="filter">Visa</label><select id="filter"><option value="all">Alla hänvisningar</option><option value="invalid">Ogiltiga hänvisningar</option><option value="review">Påståenden att granska</option><option value="unassessed">Påståenden ej bedömda</option><option value="found">Hittade källor</option><option value="unconfirmed">Obekräftade källor</option><option value="error">Kunde inte kontrolleras</option></select></div><span id="result-count"></span></div></div><div id="results"></div></aside>
+        </div>
+        <p class="report-limit">En hittad källa betyder inte att den stöder påståendet. Den lokala jämförelsen är experimentell. Stöd inte hittat betyder endast att de utvalda avsnitten inte gav stöd. Modellen avgör inte om en juridisk slutsats är riktig.</p>
+      </section>
+
+    </main>
+    <footer><a class="brand" href="./">slopcheck</a><p>Källkontroll med lagen.nu · Lokal jämförelse av påståenden · experimentellt.</p><a href="https://lagen.nu" target="_blank" rel="noopener noreferrer">lagen.nu ↗</a></footer>
+    <template id="result-template"><article class="result"><details><summary><span class="result-number"></span><span class="result-title"><strong></strong><small></small></span><span class="badge"></span><span class="semantic-summary"></span><span class="expand-icon" aria-hidden="true">+</span></summary><div class="result-body"><div class="source-list"></div></div></details></article></template>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

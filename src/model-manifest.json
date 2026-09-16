@@ -1,0 +1,25 @@
+{
+  "model": "alexandrainst/scandi-nli-small",
+  "revision": "5c7d1eec144f2342823d829693d19cf5230b32a9",
+  "version": "scandi-nli-small-5c7d1ee-q8-v1",
+  "license": "Apache-2.0",
+  "quantization": "symmetric int8 weights, float32 activations",
+  "files": {
+    "model.onnx": {
+      "bytes": 22323359,
+      "sha256": "29850f27b58ff0b31d45f385611dd2a88f4c665154eedd182a8ab25202b0549c"
+    },
+    "tokenizer.json": {
+      "bytes": 2301084,
+      "sha256": "a1e0d43ee307ad7a1ccc23e6e5398d877a68ca7f576067ac507625a0d50e9502"
+    },
+    "tokenizer_config.json": {
+      "bytes": 1270,
+      "sha256": "08c446673f7b1acbd52cfa1ed05eaaf5bf6223419b094d2dceb3ebf2832f6a3c"
+    },
+    "config.json": {
+      "bytes": 1065,
+      "sha256": "349bc35e35ffa75f7c5581899bbf922f5920582988ad74c3002a68589af2d841"
+    }
+  }
+}

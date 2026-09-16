@@ -1,0 +1,12 @@
+# slopcheck -- static SPA behind nginx. The app has no backend of its own:
+# the browser talks straight to https://lagen.nu/api/v1/ (CORS is open
+# there). Put a reverse proxy with TLS in front of port 8099, or change the
+# mapping to whatever the host's proxy expects.
+services:
+  slopcheck:
+    build: .
+    image: slopcheck:latest
+    container_name: slopcheck
+    restart: unless-stopped
+    ports:
+      - "8099:80"

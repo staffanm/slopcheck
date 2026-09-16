@@ -1,0 +1,562 @@
+[
+  {
+    "id": "late-acceptance",
+    "expected": "supported",
+    "split": "calibration",
+    "ms": 6524.70000000298,
+    "status": "supported",
+    "reason": "Källavsnittet tycks stödja påståendet. Granska villkor och sammanhang.",
+    "evidence": {
+      "text": "Antagande svar som kommer för sent ska gälla som ett nytt anbud.",
+      "scores": {
+        "entailment": 0.9782224589976218,
+        "neutral": 0.012158362902464576,
+        "contradiction": 0.009619178099913517
+      }
+    },
+    "comparisons": [
+      {
+        "text": "Antagande svar som kommer för sent ska gälla som ett nytt anbud.",
+        "scores": {
+          "entailment": 0.9782224589976218,
+          "neutral": 0.012158362902464576,
+          "contradiction": 0.009619178099913517
+        }
+      }
+    ],
+    "backend": "WASM",
+    "model": "scandi-nli-small-5c7d1ee-q8-v1"
+  },
+  {
+    "id": "late-acceptance-negated",
+    "expected": "contradiction",
+    "split": "calibration",
+    "ms": 229.20000000298023,
+    "status": "contradiction",
+    "reason": "Källavsnittet kan motsäga påståendet. Kontrollera vem som uttalar sig och vilka villkor som gäller.",
+    "evidence": {
+      "text": "Antagande svar som kommer för sent ska gälla som ett nytt anbud.",
+      "scores": {
+        "entailment": 0.013788956177904666,
+        "neutral": 0.012189779330263124,
+        "contradiction": 0.9740212644918322
+      }
+    },
+    "comparisons": [
+      {
+        "text": "Antagande svar som kommer för sent ska gälla som ett nytt anbud.",
+        "scores": {
+          "entailment": 0.013788956177904666,
+          "neutral": 0.012189779330263124,
+          "contradiction": 0.9740212644918322
+        }
+      }
+    ],
+    "backend": "WASM",
+    "model": "scandi-nli-small-5c7d1ee-q8-v1"
+  },
+  {
+    "id": "guarantee-unrelated",
+    "expected": "missing",
+    "split": "calibration",
+    "ms": 161.79999999701977,
+    "status": "abstain",
+    "reason": "Jämförelsen ger inget tillräckligt säkert resultat.",
+    "evidence": {
+      "text": "Antagande svar som kommer för sent ska gälla som ett nytt anbud.",
+      "scores": {
+        "entailment": 0.14150908337400195,
+        "neutral": 0.6165073466588935,
+        "contradiction": 0.2419835699671045
+      }
+    },
+    "comparisons": [
+      {
+        "text": "Antagande svar som kommer för sent ska gälla som ett nytt anbud.",
+        "scores": {
+          "entailment": 0.14150908337400195,
+          "neutral": 0.6165073466588935,
+          "contradiction": 0.2419835699671045
+        }
+      }
+    ],
+    "backend": "WASM",
+    "model": "scandi-nli-small-5c7d1ee-q8-v1"
+  },
+  {
+    "id": "dismissed",
+    "expected": "contradiction",
+    "split": "calibration",
+    "ms": 134.89999999850988,
+    "status": "abstain",
+    "reason": "Jämförelsen ger inget tillräckligt säkert resultat.",
+    "evidence": {
+      "text": "Högsta domstolen ogillade käromålet eftersom fordringen var preskriberad.",
+      "scores": {
+        "entailment": 0.05472226381689209,
+        "neutral": 0.2083271169686168,
+        "contradiction": 0.7369506192144911
+      }
+    },
+    "comparisons": [
+      {
+        "text": "Högsta domstolen ogillade käromålet eftersom fordringen var preskriberad.",
+        "scores": {
+          "entailment": 0.05472226381689209,
+          "neutral": 0.2083271169686168,
+          "contradiction": 0.7369506192144911
+        }
+      }
+    ],
+    "backend": "WASM",
+    "model": "scandi-nli-small-5c7d1ee-q8-v1"
+  },
+  {
+    "id": "party-attribution",
+    "expected": "contradiction",
+    "split": "calibration",
+    "ms": 142.20000000298023,
+    "status": "abstain",
+    "reason": "Jämförelsen ger inget tillräckligt säkert resultat.",
+    "evidence": {
+      "text": "Käranden anförde att avtalet var ogiltigt. Tingsrätten ansåg däremot att avtalet var giltigt.",
+      "scores": {
+        "entailment": 0.960883272037064,
+        "neutral": 0.017078576327727274,
+        "contradiction": 0.022038151635208607
+      }
+    },
+    "comparisons": [
+      {
+        "text": "Käranden anförde att avtalet var ogiltigt. Tingsrätten ansåg däremot att avtalet var giltigt.",
+        "scores": {
+          "entailment": 0.960883272037064,
+          "neutral": 0.017078576327727274,
+          "contradiction": 0.022038151635208607
+        }
+      }
+    ],
+    "backend": "WASM",
+    "model": "scandi-nli-small-5c7d1ee-q8-v1"
+  },
+  {
+    "id": "missing-exception",
+    "expected": "contradiction",
+    "split": "calibration",
+    "ms": 155.79999999701977,
+    "status": "abstain",
+    "reason": "Jämförelsen ger inget tillräckligt säkert resultat.",
+    "evidence": {
+      "text": "Avgiften ska betalas om ansökan bifalls. Om ansökan avslås ska ingen avgift betalas.",
+      "scores": {
+        "entailment": 0.018125208527220816,
+        "neutral": 0.027216219617274436,
+        "contradiction": 0.9546585718555047
+      }
+    },
+    "comparisons": [
+      {
+        "text": "Avgiften ska betalas om ansökan bifalls. Om ansökan avslås ska ingen avgift betalas.",
+        "scores": {
+          "entailment": 0.018125208527220816,
+          "neutral": 0.027216219617274436,
+          "contradiction": 0.9546585718555047
+        }
+      }
+    ],
+    "backend": "WASM",
+    "model": "scandi-nli-small-5c7d1ee-q8-v1"
+  },
+  {
+    "id": "neutral-mention",
+    "expected": "missing",
+    "split": "calibration",
+    "ms": 136.5,
+    "status": "missing",
+    "reason": "De jämförda avsnitten gav inget tydligt stöd. Det bevisar inte att påståendet är fel.",
+    "evidence": {
+      "text": "Domstolen nämnde reglerna om preskription men prövade endast frågan om rättegångskostnader.",
+      "scores": {
+        "entailment": 0.0052504415286419755,
+        "neutral": 0.9749907875653027,
+        "contradiction": 0.019758770906055243
+      }
+    },
+    "comparisons": [
+      {
+        "text": "Domstolen nämnde reglerna om preskription men prövade endast frågan om rättegångskostnader.",
+        "scores": {
+          "entailment": 0.0052504415286419755,
+          "neutral": 0.9749907875653027,
+          "contradiction": 0.019758770906055243
+        }
+      }
+    ],
+    "backend": "WASM",
+    "model": "scandi-nli-small-5c7d1ee-q8-v1"
+  },
+  {
+    "id": "costs",
+    "expected": "supported",
+    "split": "calibration",
+    "ms": 134,
+    "status": "abstain",
+    "reason": "Källavsnitten ger motstridiga signaler.",
+    "evidence": {
+      "text": "Den part som förlorar målet ska ersätta motpartens rättegångskostnader.",
+      "scores": {
+        "entailment": 0.626139947147629,
+        "neutral": 0.08484534017164588,
+        "contradiction": 0.2890147126807252
+      }
+    },
+    "comparisons": [
+      {
+        "text": "Den part som förlorar målet ska ersätta motpartens rättegångskostnader.",
+        "scores": {
+          "entailment": 0.626139947147629,
+          "neutral": 0.08484534017164588,
+          "contradiction": 0.2890147126807252
+        }
+      }
+    ],
+    "backend": "WASM",
+    "model": "scandi-nli-small-5c7d1ee-q8-v1"
+  },
+  {
+    "id": "conditional-permission",
+    "expected": "contradiction",
+    "split": "calibration",
+    "ms": 111.70000000298023,
+    "status": "abstain",
+    "reason": "Jämförelsen ger inget tillräckligt säkert resultat.",
+    "evidence": {
+      "text": "Domstolen får bevilja anstånd om det finns särskilda skäl.",
+      "scores": {
+        "entailment": 0.057271365535705,
+        "neutral": 0.6046158750448697,
+        "contradiction": 0.33811275941942537
+      }
+    },
+    "comparisons": [
+      {
+        "text": "Domstolen får bevilja anstånd om det finns särskilda skäl.",
+        "scores": {
+          "entailment": 0.057271365535705,
+          "neutral": 0.6046158750448697,
+          "contradiction": 0.33811275941942537
+        }
+      }
+    ],
+    "backend": "WASM",
+    "model": "scandi-nli-small-5c7d1ee-q8-v1"
+  },
+  {
+    "id": "quote-with-wrong-conclusion",
+    "expected": "missing",
+    "split": "calibration",
+    "ms": 136.79999999701977,
+    "status": "missing",
+    "reason": "De jämförda avsnitten gav inget tydligt stöd. Det bevisar inte att påståendet är fel.",
+    "evidence": {
+      "text": "Svaret ska gälla som ett nytt anbud.",
+      "scores": {
+        "entailment": 0.026093039980273323,
+        "neutral": 0.9183037078192275,
+        "contradiction": 0.055603252200499095
+      }
+    },
+    "comparisons": [
+      {
+        "text": "Svaret ska gälla som ett nytt anbud.",
+        "scores": {
+          "entailment": 0.026093039980273323,
+          "neutral": 0.9183037078192275,
+          "contradiction": 0.055603252200499095
+        }
+      }
+    ],
+    "backend": "WASM",
+    "model": "scandi-nli-small-5c7d1ee-q8-v1"
+  },
+  {
+    "id": "appeal-three-weeks",
+    "expected": "supported",
+    "split": "test",
+    "ms": 151.60000000149012,
+    "status": "abstain",
+    "reason": "Jämförelsen ger inget tillräckligt säkert resultat.",
+    "evidence": {
+      "text": "Ett överklagande ska ha kommit in till tingsrätten inom tre veckor från den dag då domen meddelades.",
+      "scores": {
+        "entailment": 0.8253852307756072,
+        "neutral": 0.03367630360287479,
+        "contradiction": 0.14093846562151807
+      }
+    },
+    "comparisons": [
+      {
+        "text": "Ett överklagande ska ha kommit in till tingsrätten inom tre veckor från den dag då domen meddelades.",
+        "scores": {
+          "entailment": 0.8253852307756072,
+          "neutral": 0.03367630360287479,
+          "contradiction": 0.14093846562151807
+        }
+      }
+    ],
+    "backend": "WASM",
+    "model": "scandi-nli-small-5c7d1ee-q8-v1"
+  },
+  {
+    "id": "appeal-six-weeks",
+    "expected": "contradiction",
+    "split": "test",
+    "ms": 100.10000000149012,
+    "status": "abstain",
+    "reason": "Jämförelsen ger inget tillräckligt säkert resultat.",
+    "evidence": {
+      "text": "Ett överklagande ska ha kommit in till tingsrätten inom tre veckor från den dag då domen meddelades.",
+      "scores": {
+        "entailment": 0.06549008336684961,
+        "neutral": 0.17338456112225784,
+        "contradiction": 0.7611253555108927
+      }
+    },
+    "comparisons": [
+      {
+        "text": "Ett överklagande ska ha kommit in till tingsrätten inom tre veckor från den dag då domen meddelades.",
+        "scores": {
+          "entailment": 0.06549008336684961,
+          "neutral": 0.17338456112225784,
+          "contradiction": 0.7611253555108927
+        }
+      }
+    ],
+    "backend": "WASM",
+    "model": "scandi-nli-small-5c7d1ee-q8-v1"
+  },
+  {
+    "id": "appeal-guarantee",
+    "expected": "missing",
+    "split": "test",
+    "ms": 108.09999999403954,
+    "status": "abstain",
+    "reason": "Jämförelsen ger inget tillräckligt säkert resultat.",
+    "evidence": {
+      "text": "Ett överklagande ska ha kommit in till tingsrätten inom tre veckor från den dag då domen meddelades.",
+      "scores": {
+        "entailment": 0.014094089127255554,
+        "neutral": 0.7205021464501241,
+        "contradiction": 0.2654037644226204
+      }
+    },
+    "comparisons": [
+      {
+        "text": "Ett överklagande ska ha kommit in till tingsrätten inom tre veckor från den dag då domen meddelades.",
+        "scores": {
+          "entailment": 0.014094089127255554,
+          "neutral": 0.7205021464501241,
+          "contradiction": 0.2654037644226204
+        }
+      }
+    ],
+    "backend": "WASM",
+    "model": "scandi-nli-small-5c7d1ee-q8-v1"
+  },
+  {
+    "id": "acquittal-reversed",
+    "expected": "contradiction",
+    "split": "test",
+    "ms": 94.20000000298023,
+    "status": "abstain",
+    "reason": "Källavsnitten ger motstridiga signaler.",
+    "evidence": {
+      "text": "Hovrätten frikände den tilltalade eftersom åklagaren inte hade styrkt åtalet.",
+      "scores": {
+        "entailment": 0.24270584311939672,
+        "neutral": 0.16668256534574016,
+        "contradiction": 0.5906115915348632
+      }
+    },
+    "comparisons": [
+      {
+        "text": "Hovrätten frikände den tilltalade eftersom åklagaren inte hade styrkt åtalet.",
+        "scores": {
+          "entailment": 0.24270584311939672,
+          "neutral": 0.16668256534574016,
+          "contradiction": 0.5906115915348632
+        }
+      }
+    ],
+    "backend": "WASM",
+    "model": "scandi-nli-small-5c7d1ee-q8-v1"
+  },
+  {
+    "id": "defendant-attribution",
+    "expected": "contradiction",
+    "split": "test",
+    "ms": 114,
+    "status": "abstain",
+    "reason": "Jämförelsen ger inget tillräckligt säkert resultat.",
+    "evidence": {
+      "text": "Svaranden hävdade att skulden var betald. Domstolen fann att skulden inte var betald.",
+      "scores": {
+        "entailment": 0.12897260357252854,
+        "neutral": 0.019631315498414452,
+        "contradiction": 0.851396080929057
+      }
+    },
+    "comparisons": [
+      {
+        "text": "Svaranden hävdade att skulden var betald. Domstolen fann att skulden inte var betald.",
+        "scores": {
+          "entailment": 0.12897260357252854,
+          "neutral": 0.019631315498414452,
+          "contradiction": 0.851396080929057
+        }
+      }
+    ],
+    "backend": "WASM",
+    "model": "scandi-nli-small-5c7d1ee-q8-v1"
+  },
+  {
+    "id": "notice-exception",
+    "expected": "missing",
+    "split": "test",
+    "ms": 111.79999999701977,
+    "status": "abstain",
+    "reason": "Jämförelsen ger inget tillräckligt säkert resultat.",
+    "evidence": {
+      "text": "Hyresgästen får säga upp avtalet om hyresvärden har gjort sig skyldig till ett väsentligt avtalsbrott.",
+      "scores": {
+        "entailment": 0.03292376693757024,
+        "neutral": 0.13979134766014767,
+        "contradiction": 0.8272848854022821
+      }
+    },
+    "comparisons": [
+      {
+        "text": "Hyresgästen får säga upp avtalet om hyresvärden har gjort sig skyldig till ett väsentligt avtalsbrott.",
+        "scores": {
+          "entailment": 0.03292376693757024,
+          "neutral": 0.13979134766014767,
+          "contradiction": 0.8272848854022821
+        }
+      }
+    ],
+    "backend": "WASM",
+    "model": "scandi-nli-small-5c7d1ee-q8-v1"
+  },
+  {
+    "id": "damage-mention",
+    "expected": "missing",
+    "split": "test",
+    "ms": 119.90000000596046,
+    "status": "missing",
+    "reason": "De jämförda avsnitten gav inget tydligt stöd. Det bevisar inte att påståendet är fel.",
+    "evidence": {
+      "text": "I domen hänvisas till skadeståndslagen. Målet gällde dock endast frågan om domstolens behörighet.",
+      "scores": {
+        "entailment": 0.004723636782759636,
+        "neutral": 0.9741041296118894,
+        "contradiction": 0.021172233605350713
+      }
+    },
+    "comparisons": [
+      {
+        "text": "I domen hänvisas till skadeståndslagen. Målet gällde dock endast frågan om domstolens behörighet.",
+        "scores": {
+          "entailment": 0.004723636782759636,
+          "neutral": 0.9741041296118894,
+          "contradiction": 0.021172233605350713
+        }
+      }
+    ],
+    "backend": "WASM",
+    "model": "scandi-nli-small-5c7d1ee-q8-v1"
+  },
+  {
+    "id": "written-contract",
+    "expected": "supported",
+    "split": "test",
+    "ms": 110.89999999850988,
+    "status": "abstain",
+    "reason": "Jämförelsen ger inget tillräckligt säkert resultat.",
+    "evidence": {
+      "text": "Avtalet måste vara skriftligt och undertecknat av båda parterna.",
+      "scores": {
+        "entailment": 0.9249159155291581,
+        "neutral": 0.06465594583512611,
+        "contradiction": 0.010428138635715822
+      }
+    },
+    "comparisons": [
+      {
+        "text": "Avtalet måste vara skriftligt och undertecknat av båda parterna.",
+        "scores": {
+          "entailment": 0.9249159155291581,
+          "neutral": 0.06465594583512611,
+          "contradiction": 0.010428138635715822
+        }
+      }
+    ],
+    "backend": "WASM",
+    "model": "scandi-nli-small-5c7d1ee-q8-v1"
+  },
+  {
+    "id": "may-becomes-must",
+    "expected": "contradiction",
+    "split": "test",
+    "ms": 132.79999999701977,
+    "status": "abstain",
+    "reason": "Jämförelsen ger inget tillräckligt säkert resultat.",
+    "evidence": {
+      "text": "Om det finns synnerliga skäl får rätten besluta om undantag från tidsfristen.",
+      "scores": {
+        "entailment": 0.0980643266758089,
+        "neutral": 0.887992960730463,
+        "contradiction": 0.013942712593728203
+      }
+    },
+    "comparisons": [
+      {
+        "text": "Om det finns synnerliga skäl får rätten besluta om undantag från tidsfristen.",
+        "scores": {
+          "entailment": 0.0980643266758089,
+          "neutral": 0.887992960730463,
+          "contradiction": 0.013942712593728203
+        }
+      }
+    ],
+    "backend": "WASM",
+    "model": "scandi-nli-small-5c7d1ee-q8-v1"
+  },
+  {
+    "id": "quotation-overreach",
+    "expected": "missing",
+    "split": "test",
+    "ms": 102.60000000149012,
+    "status": "abstain",
+    "reason": "Jämförelsen ger inget tillräckligt säkert resultat.",
+    "evidence": {
+      "text": "Rätten får besluta om undantag om det finns synnerliga skäl.",
+      "scores": {
+        "entailment": 0.06353986668448838,
+        "neutral": 0.6855169584437616,
+        "contradiction": 0.2509431748717499
+      }
+    },
+    "comparisons": [
+      {
+        "text": "Rätten får besluta om undantag om det finns synnerliga skäl.",
+        "scores": {
+          "entailment": 0.06353986668448838,
+          "neutral": 0.6855169584437616,
+          "contradiction": 0.2509431748717499
+        }
+      }
+    ],
+    "backend": "WASM",
+    "model": "scandi-nli-small-5c7d1ee-q8-v1"
+  }
+]

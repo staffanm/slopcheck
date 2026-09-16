@@ -1,0 +1,9 @@
+ScandiNLI small — Alexandra Institute
+Original: https://huggingface.co/alexandrainst/scandi-nli-small
+Revision: 5c7d1eec144f2342823d829693d19cf5230b32a9
+License: Apache License 2.0 (see MODEL-LICENSE.txt)
+
+slopcheck exports the original weights to ONNX and quantizes matrix weights
+and embeddings to symmetric int8. Activations remain float32.
+The quantized version is scandi-nli-small-5c7d1ee-q8-v1.
+The original authors do not endorse slopcheck or its legal assessment labels.
