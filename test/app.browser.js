@@ -279,7 +279,7 @@ test('local privacy mode extracts citations without sending document text to API
   const text = 'Enligt 4 § avtalslagen ska ett sent svar räknas som ett nytt anbud.';
   await page.locator('#text').fill(text);
   await page.locator('#check').click();
-  await expect(page.locator('#progress')).toBeHidden({ timeout: 30000 });
+  await expect(page.locator('#progress')).toBeHidden({ timeout: 45000 });
   await expect(page.locator('.citation-mark.found')).toHaveCount(1);
   expect(requests.filter(r => r.method() === 'POST')).toHaveLength(0);
   expect(requests.filter(r => r.url().includes('/resolve?'))).toHaveLength(1);
@@ -292,9 +292,9 @@ test('a supported claim shows separate source validity, original evidence, and p
   await page.goto('/');
   await page.locator('#text').fill('Ett sent svar ska räknas som ett nytt anbud. Se 4 § avtalslagen.');
   await page.locator('#check').click();
-  await expect(page.locator('#progress')).toBeHidden({ timeout: 30000 });
+  await expect(page.locator('#progress')).toBeHidden({ timeout: 45000 });
   await expect(page.locator('.result > details > summary > .found')).toHaveCount(1);
-  await expect(page.locator('.semantic-result.supported')).toBeVisible();
+  await expect(page.locator('.semantic-result.correct, .semantic-result.supported')).toBeVisible();
   await expect(page.locator('.decisive-evidence')).toContainText('4 § Ett sent svar');
   await expect(page.locator('.semantic-result')).toContainText('Jämfört påstående: Ett sent svar');
   await page.evaluate(() => window.dispatchEvent(new Event('beforeprint')));

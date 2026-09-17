@@ -76,36 +76,78 @@ export function normalizeQuote(text) {
     .replace(/[“”„"'‘’]/g, '').replace(/\s+/g, ' ').trim();
 }
 
+// Mask only punctuation, never whitespace: every index remains a UTF-16 index
+// into the original. Reuse this for claims and sources (including initials).
+export function sentenceSegments(text, locations = []) {
+  let masked = text
+    .replace(/\b(?:t\.\s*ex|bl\.\s*a|d\.\s*v\.\s*s|dvs|m\.\s*fl|m\.\s*m|o\.\s*s\.\s*v|osv|p\.\s*g\.\s*a|s\.\s*k|jfr|prop|kap|st|bil|aktbil|nr|ref|not|avd|art|s|ff)\./gi, m => m.replace(/\./g, '_'))
+    .replace(/(?:\b[A-ZÅÄÖ]\.)+(?=\s|[A-ZÅÄÖ])/g, m => m.replace(/\./g, '_'))
+    .replace(/(^|\n)[^\p{L}\p{N}\r\n]*\d+(?:\.\d+)*\.(?=\s|\p{Lu})/gu, m => m.replace(/\./g, '_'))
+    .replace(/\d\.(?=\d)/g, m => m.replace('.', '_'));
+  for (const { start, end } of locations) masked = masked.slice(0, start)
+    + masked.slice(start, end).replace(/[^\s]/g, 'X') + masked.slice(end);
+  const result = [];
+  // Blank lines delimit paragraphs even when headings have no punctuation.
+  for (const paragraph of masked.matchAll(/[^\r\n]+(?:\r?\n(?!\s*\r?\n)[^\r\n]+)*/g)) {
+    for (const part of new Intl.Segmenter('sv', { granularity: 'sentence' }).segment(paragraph[0].replace(/[\r\n]/g, ' '))) {
+      const index = paragraph.index + part.index;
+      result.push({ index, segment: text.slice(index, index + part.segment.length) });
+    }
+  }
+  return result;
+}
+
+export function citationOnly(text) {
+  return !text.replace(/(?<!\p{L})(?:se|jfr|även|bl|a|t|ex|och)(?!\p{L})/giu, '').replace(/[^\p{L}\p{N}]/gu, '');
+}
+
 export function claimContext(occurrence, blocks) {
-  const parts = occurrence.locations.map(location => {
+  const ranges = [];
+  let incomplete = false;
+  for (const location of occurrence.locations) {
     const block = blocks.find(item => item.id === location.block_id);
     if (!block || location.start < 0 || location.end > block.text.length) {
       throw new Error('API:t returnerar en position som saknas i dokumentet.');
     }
-    // Segment a masked citation so "NJA 2013 s. 372" remains one sentence.
-    const masked = block.text.slice(0, location.start)
-      + 'X'.repeat(location.end - location.start) + block.text.slice(location.end);
-    const normalized = extractionText(masked);
-    const citationStart = normalized.offsets.indexOf(location.start);
-    const segments = [...new Intl.Segmenter('sv', { granularity: 'sentence' }).segment(normalized.text)];
-    const index = segments.findIndex(s => s.index <= citationStart && s.index + s.segment.length > citationStart);
+    const segments = sentenceSegments(block.text, [location]);
+    const index = segments.findIndex(s => s.index <= location.start && s.index + s.segment.length > location.start);
     const segment = segments[index];
-    if (!segment) return '';
-    const contextStart = segment.segment.replace(/X/g, '').replace(/\b(se|jfr|även)\b/gi, '').replace(/[^\p{L}]/gu, '').length < 20 && index > 0
+    if (!segment) continue;
+    const withoutCitation = block.text.slice(segment.index, location.start) + block.text.slice(location.end, segment.index + segment.segment.length);
+    const contextStart = citationOnly(withoutCitation) && index > 0
+      && !/\n\s*\n/.test(block.text.slice(segments[index - 1].index, segment.index))
       ? segments[index - 1].index : segment.index;
-    return block.text.slice(normalized.offsets[contextStart], normalized.offsets[segment.index + segment.segment.length]).trim();
-  });
-  const text = [...new Set(parts)].join(' ');
-  return { text, assessable: text.length <= 1600 && text.replace(occurrence.text, '').match(/\p{L}{3,}/gu)?.length >= 6 };
+    ranges.push({ block_id: block.id, start: contextStart, end: segment.index + segment.segment.length });
+    // A PDF page can end mid-sentence, before a stamp emitted out of reading
+    // order. Join only an unambiguous lowercase continuation on the next page.
+    if (/^PDF-sida/.test(block.label ?? '') && !/[.!?][”"')\]]*\s*$/.test(segment.segment)) {
+      const tail = block.text.slice(segment.index + segment.segment.length).trim();
+      const next = blocks[blocks.indexOf(block) + 1];
+      const continuation = next && /^PDF-sida/.test(next.label ?? '') && sentenceSegments(next.text)[0];
+      if ((!tail || /^(?:[\p{Lu} -]+TINGSRÄTT|INKOM:)/u.test(tail)) && continuation && /^\p{Ll}/u.test(continuation.segment)
+        && /[.!?][”"')\]]*\s*$/.test(continuation.segment)) {
+        ranges.push({ block_id: next.id, start: continuation.index, end: continuation.index + continuation.segment.length });
+      } else incomplete = true;
+    }
+  }
+  const unique = [...new Map(ranges.map(range => [JSON.stringify(range), range])).values()];
+  const text = unique.map(range => blocks.find(b => b.id === range.block_id).text.slice(range.start, range.end).trim()).join(' ');
+  return { text, locations: unique, incomplete, assessable: !incomplete && text.length <= 1600 };
 }
 
 function words(text) {
   return normalizeQuote(text).match(/\p{L}{3,}/gu)?.filter(word => !STOP.has(word)) ?? [];
 }
 
-export function provisionText(markdown, uri) {
+export function provisionText(markdown, uri, anchors) {
   const fragment = new URL(uri).hash.slice(1);
   if (!fragment) return { text: markdown, exact: false };
+  if (anchors && anchors[fragment]) {
+    const [start, end] = anchors[fragment];
+    if (typeof start === 'number' && typeof end === 'number' && end >= start) {
+      return { text: markdown.slice(start, end).trim(), exact: true };
+    }
+  }
   // Markdown exposes Swedish chapters as linked headings and provisions in bold.
   const provision = /^(?:K(\d+[a-z]?))?P(\d+[a-z]?)$/i.exec(fragment);
   if (!provision) return { text: markdown, exact: false };
@@ -144,19 +186,22 @@ function sourceParagraphs(markdown, reportingCourt) {
   let role = 'unknown';
   let headnote = false;
   let group = 0;
+  let reportedDepth;
   const paragraphs = [];
   for (const block of markdown.split(/\n\s*\n/).filter(Boolean)) {
     const heading = /^(#{1,6}) (.+)$/.exec(block.trim());
     if (heading) {
       section = plainText(heading[2]);
       const namedCourt = courtName(section);
+      if (namedCourt || (reportedDepth && heading[1].length <= reportedDepth)) reportedDepth = undefined;
       if (heading[1] === '#') { role = reportingCourt ? 'summary' : 'unknown'; headnote = Boolean(reportingCourt); }
       else if (namedCourt) { court = namedCourt; role = 'unknown'; }
       else if (/^(?:sammanfattning|sammanfattande (?:slutsatser|bedömning)|slutsatser?)$/i.test(section)) role = 'summary';
       else if (/^(?:(?:hovrättens|tingsrättens|HD:s|HFD:s|högsta domstolens|högsta förvaltningsdomstolens) )?(?:domslut|beslut|avgörande)$/i.test(section)) role = 'decision';
-      else if (/bakgrund|parternas|yrkanden|inställning|betänkande|skiljaktig/i.test(section)) role = 'reported';
+      else if (/bakgrund|parternas|yrkanden|inställning|betänkande|skiljaktig/i.test(section)) { role = 'reported'; reportedDepth = heading[1].length; }
       else if (/^(?:mål nr|föredraget)/i.test(section)) role = 'metadata';
       else if (court) role = 'reasoning';
+      if (reportedDepth) role = 'reported';
       group++;
       continue;
     }
@@ -184,7 +229,7 @@ function provisionUnits(plain) {
     else units.push(block);
   }
   return units.flatMap(unit => unit.length <= 400 || /\n\n(?:\d+[.)]|[a-z][.)]|[-–•])\s/.test(unit) ? [unit]
-    : [...new Intl.Segmenter('sv', { granularity: 'sentence' }).segment(unit)].map(item => item.segment.trim()).filter(Boolean))
+    : sentenceSegments(unit).map(item => item.segment.trim()).filter(Boolean))
     .map((text, index) => ({ text, group: 0, index }));
 }
 
@@ -192,16 +237,16 @@ function passageChunks(paragraphs) {
   const passages = [];
   for (let index = 0; index < paragraphs.length; index++) {
     const paragraph = paragraphs[index];
-    const sentences = [...new Intl.Segmenter('sv', { granularity: 'sentence' }).segment(paragraph.text)].map(item => item.segment);
+    const sentences = sentenceSegments(paragraph.text).map(item => item.segment);
     let chunks = [''];
     for (const sentence of sentences) {
-      if (chunks.at(-1) && chunks.at(-1).length + sentence.length > 1400) chunks.push('');
+      if (chunks.at(-1) && chunks.at(-1).length + sentence.length > 600) chunks.push('');
       chunks[chunks.length - 1] += sentence; // Preserve long sentences for tokenizer rejection, never cut off their conditions.
     }
     for (let text of chunks) {
       if (chunks.length === 1) for (let next = index + 1; next < Math.min(index + 4, paragraphs.length); next++) {
         const following = paragraphs[next];
-        if (following.group !== paragraph.group || following.role !== paragraph.role || text.length + following.text.length + 2 > 1400) break;
+        if (following.group !== paragraph.group || following.role !== paragraph.role || text.length + following.text.length + 2 > 600) break;
         text += '\n\n' + following.text;
       }
       passages.push({ ...paragraph, text: text.trim(), index: passages.length });
@@ -210,8 +255,8 @@ function passageChunks(paragraphs) {
   return passages;
 }
 
-export function selectEvidence(markdown, uri, claim) {
-  const scope = provisionText(markdown, uri);
+export function selectEvidence(markdown, uri, claim, anchors) {
+  const scope = provisionText(markdown, uri, anchors);
   const plain = plainText(scope.text);
   const judgment = new URL(uri).pathname.startsWith('/dom/');
   const paragraphs = scope.exact ? provisionUnits(plain) : sourceParagraphs(scope.text, judgment ? REPORTING_COURT[new URL(uri).pathname.split('/')[2]] : undefined);
@@ -258,6 +303,41 @@ export function occurrenceStatus(targets) {
     if (targets.some(target => target.status === status)) return status;
   }
   return 'found';
+}
+
+export function invalidCitationMessage(target, occurrence) {
+  const text = (occurrence?.text ?? '').replace(/\s+/g, ' ').trim();
+  const uri = target?.uri ?? '';
+  const isCase = uri.includes('/dom/') || target?.source === 'dv'
+    || /^(?:NJA|HFD|RÅ|RH|AD|MÖD|MIG|PMÖD|MD|RK)\b/i.test(text);
+
+  if (isCase) {
+    return `Det finns inget rättsfall betecknat ${text}.`;
+  }
+
+  const hash = uri.includes('#') ? uri.split('#')[1] : '';
+  const provMatch = /^((?:(?:\d+\s*[a-z]?\s*kap\.?\s*)?(?:\d+\s*[a-z]?\s*§))|(?:(?:\d+\s*[a-z]?\s*§)\s*(?:\d+\s*[a-z]?\s*kap\.?)))(?:\s+(?:i|av)\s+|\s+)(.+)$/i.exec(text);
+
+  if (hash || provMatch) {
+    if (provMatch) {
+      const prov = provMatch[1].replace(/\s+/g, ' ').replace(/(?<=\d)§/, ' §');
+      const law = provMatch[2].trim();
+      return `Det finns ingen ${prov} i ${law}.`;
+    }
+    const kMatch = /K(\d+[a-z]?)/i.exec(hash);
+    const pMatch = /P(\d+[a-z]?)/i.exec(hash);
+    const provParts = [];
+    if (kMatch) provParts.push(`${kMatch[1]} kap.`);
+    if (pMatch) provParts.push(`${pMatch[1]} §`);
+    const prov = provParts.join(' ');
+    if (prov) return `Det finns ingen ${prov} i den angivna författningen (${text}).`;
+  }
+
+  if (/^(?:sfs\s+)?\d{4}:-?\d+$/i.test(text)) {
+    return `Det finns ingen författning med beteckningen ${text}.`;
+  }
+
+  return `Det finns ingen lag som heter ${text}.`;
 }
 
 export function pdfPageText(items) {

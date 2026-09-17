@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import pasted from './fixtures/pasted-line-wrap.json' with { type: 'json' };
-import { citationSegments, claimContext, classifyResolution, extractionText, normalizeQuote, occurrenceStatus, originalOccurrences, pdfPageText, provisionText, selectEvidence, validateBlocks } from '../src/analysis.js';
+import { citationSegments, claimContext, classifyResolution, extractionText, invalidCitationMessage, normalizeQuote, occurrenceStatus, originalOccurrences, pdfPageText, provisionText, selectEvidence, validateBlocks } from '../src/analysis.js';
 import { extract } from '../src/api.js';
 import { extractLocal, getLocalParser } from '../src/lagrum-extract.js';
 
@@ -61,7 +61,7 @@ test('UTF-16 positions retain emoji, repeated occurrences, and citation abbrevia
 test('citation-only sentences use the preceding proposition', () => {
   const text = 'Ett sent svar ska räknas som ett nytt anbud. Se 4 § avtalslagen.';
   const start = text.indexOf('4 §');
-  const claim = claimContext({ text: '4 § avtalslagen', locations: [{ block_id: 'text', start, end: start + 14 }] }, [{ id: 'text', text }]);
+  const claim = claimContext({ text: '4 § avtalslagen', locations: [{ block_id: 'text', start, end: start + '4 § avtalslagen'.length }] }, [{ id: 'text', text }]);
   assert.equal(claim.text, text);
 });
 
@@ -182,4 +182,36 @@ test('extract in local privacy mode throws when aborted', async () => {
     { name: 'AbortError' }
   );
 });
+
+test('invalidCitationMessage provides adapted Swedish error messages for nonexistent sources', () => {
+  assert.equal(
+    invalidCitationMessage({ uri: 'https://lagen.nu/dom/nja/2013s372', source: 'dv' }, { text: 'NJA 2013 s. 372' }),
+    'Det finns inget rättsfall betecknat NJA 2013 s. 372.'
+  );
+  assert.equal(
+    invalidCitationMessage({ uri: 'https://lagen.nu/1915:218#K12P1', source: 'sfs' }, { text: '12 kap. 1§ avtalslagen' }),
+    'Det finns ingen 12 kap. 1 § i avtalslagen.'
+  );
+  assert.equal(
+    invalidCitationMessage({ uri: 'https://lagen.nu/1915:218#K1P12', source: 'sfs' }, { text: '1 kap. 12 § i avtalslagen' }),
+    'Det finns ingen 1 kap. 12 § i avtalslagen.'
+  );
+  assert.equal(
+    invalidCitationMessage({ uri: 'https://lagen.nu/2052:1506', source: 'sfs' }, { text: 'cybersäkerhetslagen (2052:1506)' }),
+    'Det finns ingen lag som heter cybersäkerhetslagen (2052:1506).'
+  );
+  assert.equal(
+    invalidCitationMessage({ uri: 'https://lagen.nu/2052:1506', source: 'sfs' }, { text: 'SFS 2052:1506' }),
+    'Det finns ingen författning med beteckningen SFS 2052:1506.'
+  );
+});
+
+test('claimContext does not split on abbreviations such as t.ex. and bl.a.', () => {
+  const text = '1. Rättslig grund Borgensåtagandet i förevarande mål utgör en proprieborgen, vilket enligt 10 kap. 9 § handelsbalken och rättspraxis (t.ex. NJA 2013 s. 372) innebär att borgenären har rätt att kräva betalning. Nästa mening.';
+  const start = text.indexOf('10 kap. 9 § handelsbalken');
+  const claim = claimContext({ text: '10 kap. 9 § handelsbalken', locations: [{ block_id: 'text', start, end: start + '10 kap. 9 § handelsbalken'.length }] }, [{ id: 'text', text }]);
+  assert.match(claim.text, /innebär att borgenären har rätt att kräva betalning\.$/);
+  assert.doesNotMatch(claim.text, /Nästa mening/);
+});
+
 

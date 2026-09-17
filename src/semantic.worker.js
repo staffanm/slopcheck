@@ -82,7 +82,7 @@ self.onmessage = async ({ data: { id, base, claim, evidence } }) => {
       if (!encoded) { selected.incomplete = true; continue; }
       comparisons.push({ text: passage.text, court: passage.court, section: passage.section, role: passage.role, scores: await compare(encoded) });
     }
-    self.postMessage({ id, result: { ...semanticResult(comparisons, { ...selected, requireConclusion: evidence.requireConclusion, reason: evidence.reason }), backend, model: MODEL_VERSION } });
+    self.postMessage({ id, result: { ...semanticResult(comparisons, { ...selected, requireConclusion: evidence.requireConclusion, reason: evidence.reason, exact: evidence.exact }), backend, model: MODEL_VERSION } });
   } catch (error) {
     // Worker boundary: preserve deterministic results and expose a retryable abstention.
     self.postMessage({ id, error: `Den lokala modellen kunde inte jämföra texten: ${error.message}` });

@@ -1,6 +1,6 @@
 import './style.css';
-import { extract, pool, request, resolveTarget, stopExtractionWorker } from './api.js';
-import { citationSegments, claimContext, occurrenceStatus, validateBlocks } from './analysis.js';
+import { extract, getDocumentSource, pool, request, resolveTarget, resolveTargetPrivate, stopExtractionWorker } from './api.js';
+import { citationSegments, claimContext, invalidCitationMessage, occurrenceStatus, validateBlocks } from './analysis.js';
 import { matchesFilter, MODEL_VERSION, rowSemantic, SEMANTIC, semanticClaim } from './semantic.js';
 import { semanticClient } from './semantic-client.js';
 
@@ -213,7 +213,7 @@ function renderSource(target, evidence, multiple, row) {
   }
   if (target.status !== 'found') {
     section.append(element('p', 'source-note', {
-      invalid: 'Ogiltig enligt lagen.nu:s kontroll.',
+      invalid: invalidCitationMessage(target, row.occurrence),
       unconfirmed: 'lagen.nu kan inte bekräfta källan.',
       pending: 'Kontrollen pågår.', error: target.error,
     }[target.status]));
@@ -222,7 +222,7 @@ function renderSource(target, evidence, multiple, row) {
   section.append(sourceLink(target.result.pin?.uri ?? target.result.uri, target.result.pin?.label ?? target.result.display ?? target.result.identifier ?? target.uri));
   const result = row.semantic.get(target.uri);
   if (result) {
-    const review = element('div', `semantic-result ${result.status}`);
+    const review = element('div', `semantic-result ${result.status}${result.status === 'correct' ? ' supported' : ''}${result.status === 'incorrect' ? ' contradiction' : ''}`);
     review.append(element('strong', '', `${SEMANTIC[result.status][0]} · experimentellt`));
     if (result.status !== 'pending') {
       review.append(element('p', 'source-note', result.reason));
@@ -330,12 +330,13 @@ function updateMarks() {
   for (const mark of documentMarks) {
     const status = occurrenceStatus(mark.rows.map(index => ({ status: rowStatus(index) })));
     const active = mark.rows.includes(selectedRow);
-    const review = mark.rows.some(index => ['contradiction', 'missing'].includes(rowSemantic(rows[index])));
-    const claimLabel = [...new Set(mark.rows.map(index => SEMANTIC[rowSemantic(rows[index])][0]))].join(', ');
+    const isInvalid = status === 'invalid';
+    const review = mark.rows.some(index => ['incorrect', 'contradiction', 'misleading', 'missing'].includes(rowSemantic(rows[index])));
+    const claimLabel = isInvalid ? '' : [...new Set(mark.rows.map(index => SEMANTIC[rowSemantic(rows[index])]?.[0]).filter(Boolean))].join(', ');
     mark.node.className = `citation-mark ${status}${active ? ' selected' : ''}${review && status === 'found' ? ' semantic-review' : ''}`;
-    mark.node.setAttribute('aria-label', `Hänvisning ${mark.rows.map(index => index + 1).join(', ')}: ${mark.node.textContent}. ${STATUS[status][1]}. Påstående: ${claimLabel} (experimentellt). Visa detaljer.`);
+    mark.node.setAttribute('aria-label', `Hänvisning ${mark.rows.map(index => index + 1).join(', ')}: ${mark.node.textContent}. ${STATUS[status][1]}.${claimLabel ? ` Påstående: ${claimLabel} (experimentellt).` : ''} Visa detaljer.`);
     mark.node.setAttribute('aria-pressed', String(active));
-    mark.node.title = `${STATUS[status][1]} · ${claimLabel} (experimentellt)`;
+    mark.node.title = isInvalid ? STATUS[status][1] : `${STATUS[status][1]} · ${claimLabel} (experimentellt)`;
   }
 }
 
@@ -386,8 +387,13 @@ function updateReport() {
     existing.textContent = STATUS[status].join(' ');
     const filter = $('#filter').value;
     const semantic = rowSemantic(row);
-    node.querySelector('.semantic-summary').textContent = `Påstående: ${SEMANTIC[semantic][0]}`;
-    node.querySelector('.semantic-summary').className = `semantic-summary ${semantic}`;
+    if (status === 'invalid') {
+      node.querySelector('.semantic-summary').textContent = '';
+      node.querySelector('.semantic-summary').className = 'semantic-summary';
+    } else {
+      node.querySelector('.semantic-summary').textContent = `Påstående: ${SEMANTIC[semantic][0]}`;
+      node.querySelector('.semantic-summary').className = `semantic-summary ${semantic}`;
+    }
     node.hidden = !matchesFilter(filter, status, semantic);
     if (!node.hidden) visible++;
     // Leave expanded source passages alone unless their data changed.
@@ -398,7 +404,8 @@ function updateReport() {
       if (!rowTargets.length) node.querySelector('.source-list').append(element('p', 'source-note', 'Hänvisningen kunde inte kopplas till en källa.'));
     }
   });
-  $('#summary').replaceChildren(...[[rows.length, 'Hänvisningar'], [counts.invalid, 'Ogiltiga hänvisningar'], [counts.found, 'Hittade källor'], [counts.unconfirmed + counts.error + counts.pending, 'Obekräftade / ej klara'], [rows.filter(row => matchesFilter('review', '', rowSemantic(row))).length, 'Påståenden att granska'], [rows.filter(row => matchesFilter('unassessed', '', rowSemantic(row))).length, 'Påståenden ej bedömda']].map(([count, label]) => {
+  const validRows = rows.filter((row, index) => rowStatus(index) !== 'invalid');
+  $('#summary').replaceChildren(...[[rows.length, 'Hänvisningar'], [counts.invalid, 'Ogiltiga hänvisningar'], [counts.found, 'Hittade källor'], [counts.unconfirmed + counts.error + counts.pending, 'Obekräftade / ej klara'], [validRows.filter(row => matchesFilter('review', '', rowSemantic(row))).length, 'Påståenden att granska'], [validRows.filter(row => matchesFilter('unassessed', '', rowSemantic(row))).length, 'Påståenden ej bedömda']].map(([count, label]) => {
     const cell = element('div');
     cell.append(element('strong', '', count), element('span', '', label));
     return cell;
@@ -430,20 +437,20 @@ async function checkTarget(target, signal) {
   updateReport();
   if (target.status !== 'found') return;
   try {
-    const uri = target.result.uri.split('#')[0];
+    const uri = (target.result?.uri ?? target.uri).split('#')[0];
     if (!sourceCache.has(uri)) sourceCache.set(uri, request(`document?${new URLSearchParams({ uri, format: 'md' })}`, { signal }));
     const source = await sourceCache.get(uri);
     if (typeof source.markdown !== 'string') throw new Error('API:t returnerar ingen källtext.');
     for (const row of rows.filter(row => row.occurrence.targets.some(item => item.uri === target.uri))) {
       signal.throwIfAborted();
-      const evidence = await work('evidence', { markdown: source.markdown, uri: target.result.pin?.uri ?? target.uri, claim: row.claim });
+      const evidence = await work('evidence', { markdown: source.markdown, anchors: source.anchors, uri: target.result.pin?.uri ?? target.uri, claim: row.claim });
       signal.throwIfAborted();
       row.evidence.set(target.uri, evidence);
     }
   } catch (error) {
     if (signal.aborted) throw error;
     target.sourceError = error.message;
-    sourceCache.delete(target.result.uri.split('#')[0]);
+    sourceCache.delete((target.result?.uri ?? target.uri).split('#')[0]);
   }
   target.revision++;
   updateReport();
@@ -465,11 +472,19 @@ async function compareClaims(signal, retry = false) {
     for (const target of row.occurrence.targets.map(item => targets.get(item.uri))) {
       signal.throwIfAborted();
       if (retry && !row.semantic.get(target.uri)?.retryable) continue;
+      if (target.status === 'invalid') {
+        row.semantic.set(target.uri, { status: 'abstain', reason: 'Hänvisningen är ogiltig.' });
+        row.semanticRevision++;
+        updateReport();
+        continue;
+      }
       const evidence = row.evidence.get(target.uri);
       let reason = !row.claim.assessable ? row.claim.reason
         : target.status !== 'found' ? 'Källan har inte bekräftats.'
-          : !evidence?.passages.length ? evidence?.reason ?? 'Ingen källtext finns att jämföra.'
-            : new URL(target.uri).hash && !evidence.exact && target.source === 'sfs' ? 'Den hänvisade bestämmelsen kunde inte avgränsas.' : undefined;
+        : target.sourceError ? 'Källtexten kunde inte hämtas för jämförelse.'
+        : !evidence?.passages?.length ? 'Inga relevanta källavsnitt hittades i källtexten.'
+        : new URL(target.uri).hash && !evidence.exact && target.source === 'sfs' ? 'Den hänvisade bestämmelsen kunde inte avgränsas.'
+        : evidence?.reason;
       let result;
       if (reason) result = { status: 'abstain', reason };
       else if (failure) result = { status: 'abstain', reason: failure, retryable: true };
@@ -498,7 +513,7 @@ function updatePrivacyNote() {
   const note = $('#privacy-note');
   if (!note) return;
   if (isLocal) {
-    note.innerHTML = '<span aria-hidden="true">🔒</span> <strong>Lokal identifiering är aktiv.</strong> Texten analyseras lokalt i webbläsaren med LagrumParser och lämnar inte din enhet. Endast identifierade hänvisningar skickas till uppslags-API:t för att kontrollera om källan finns. Originalfilen stannar på din enhet. Den lokala jämförelsen hämtar cirka 25 MB modellfiler samt körmiljön första gången.';
+    note.innerHTML = '<span aria-hidden="true">🔒</span> <strong>Lokal identifiering är aktiv.</strong> Texten analyseras lokalt i webbläsaren med LagrumParser. Källor kontrolleras anonymt med <em>k</em>-anonymitet (/range) och hämtas via volympaket när tillgängligt. Varken ditt dokument eller dina specifika hänvisningar läcker till servern. Den lokala jämförelsen körs i webbläsaren.';
   } else {
     note.innerHTML = '<span aria-hidden="true">↳</span> Texten skickas till lagen.nu för att hitta hänvisningar. Den behandlas tillfälligt i minnet, tas bort efter behandlingen, sparas aldrig och skickas aldrig vidare. Resultatet skickas endast till dig. Originalfilen stannar på din enhet. Den lokala jämförelsen hämtar cirka 25 MB modellfiler samt körmiljön första gången. Filerna hämtas från denna webbplats och kan återanvändas.';
   }
@@ -534,7 +549,7 @@ $('#check').addEventListener('click', async () => {
     checkedBlocks = blocks.map(block => ({ ...block }));
     const occurrences = await extract(checkedBlocks, signal, { local: isLocal });
     signal.throwIfAborted();
-    rows = occurrences.map(occurrence => ({ occurrence, claim: semanticClaim(occurrence, claimContext(occurrence, checkedBlocks), checkedBlocks), evidence: new Map(), semantic: new Map(occurrence.targets.map(target => [target.uri, { status: 'pending' }])), semanticRevision: 0 }));
+    rows = occurrences.map(occurrence => ({ occurrence, claim: semanticClaim(occurrence, claimContext(occurrence, checkedBlocks), checkedBlocks, occurrences), evidence: new Map(), semantic: new Map(occurrence.targets.map(target => [target.uri, { status: 'pending' }])), semanticRevision: 0 }));
     for (const row of rows) for (const target of row.occurrence.targets) targets.set(target.uri, { ...target, status: 'pending', revision: 0 });
     reportName = selectedFile ? selectedFile.name : 'Inklistrad text';
     reportDate = new Date().toLocaleString('sv');

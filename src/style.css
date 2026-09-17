@@ -186,12 +186,13 @@ footer p, footer > a:last-child { font-size: 11px; color: var(--muted); }
 }
 
 .semantic-summary { font-size: 10px; color: var(--muted); margin-left: 24px; width: calc(100% - 50px); }
-.semantic-summary.contradiction, .semantic-summary.missing, .legend-review { color: #805011; }
+.semantic-summary.incorrect, .semantic-summary.contradiction, .semantic-summary.missing, .semantic-summary.misleading, .legend-review { color: #805011; }
 .citation-mark.found.semantic-review { background: #fff1cf; border-bottom: 2px dotted #99701f; }
 .semantic-result { margin: 8px 0; padding: 8px 10px; background: #f3f4ee; border-radius: 3px; }
 .semantic-result > strong { font-size: 11px; }
-.semantic-result.contradiction, .semantic-result.missing { background: #fff3d9; }
-.semantic-result.supported { background: #edf3e4; }
+.semantic-result.incorrect, .semantic-result.contradiction, .semantic-result.missing, .semantic-result.misleading { background: #fff3d9; }
+.semantic-result.correct, .semantic-result.supported { background: #edf3e4; }
+.semantic-result.nonsensical { background: #f3f4ee; }
 .semantic-result .source-note { font-size: 11px; }
 .semantic-result .decisive-evidence { font-size: 13px; margin-top: 8px; }
 @media print { .semantic-result { print-color-adjust: exact; } .semantic-summary { width: auto; } }

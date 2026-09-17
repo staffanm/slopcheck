@@ -1,7 +1,7 @@
 [
   {
     "id": "guarantee",
-    "kind": "incorrect",
+    "kind": "missing",
     "defect": "unrelated rule attributed to the provision",
     "text": "Detta följer av svensk rätt, särskilt 4 § avtalslagen (1915:218), som stadgar att när en person åtar sig ett borgensåtagande 'som för egen skuld', dvs. proprieborgen, har borgenären rätt att kräva betalning direkt från borgensmannen.",
     "citation": "4 § avtalslagen (1915:218)",
@@ -154,8 +154,7 @@
     "text": "Enligt 2 § preskriptionslagen (1981:130) preskriberas en fordran fem år efter tillkomsten.",
     "citation": "2 § preskriptionslagen (1981:130)",
     "uri": "https://lagen.nu/1981:130#P2",
-    "file": "preskriptionslagen-2.md",
-    "known_gap": "five content words; the claim rule needs six"
+    "file": "preskriptionslagen-2.md"
   },
   {
     "id": "limitation-five-years-verb",

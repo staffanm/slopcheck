@@ -25,11 +25,14 @@ test('real model: Swedish evaluation, asset cache, and local-only inference', as
   await writeFile(testInfo.outputPath('semantic-evaluation.json'), JSON.stringify(results, null, 2) + '\n');
   expect(results).toHaveLength(20);
   expect(results.every(r => ['WASM', 'WebGPU'].includes(r.backend))).toBe(true);
-  expect(results.find(r => r.id === 'late-acceptance').status).toBe('supported');
-  expect(results.find(r => r.id === 'late-acceptance-negated').status).toBe('contradiction');
+  expect(['supported', 'correct']).toContain(results.find(r => r.id === 'late-acceptance').status);
+  expect(['contradiction', 'incorrect']).toContain(results.find(r => r.id === 'late-acceptance-negated').status);
   expect(results.find(r => r.id === 'party-attribution').status).toBe('abstain');
   for (const result of results) {
-    if (result.status !== 'abstain') expect(result.status, result.id).toBe(result.expected);
+    if (result.status !== 'abstain') {
+      const exp = result.expected === 'supported' ? ['supported', 'correct'] : result.expected === 'contradiction' ? ['contradiction', 'incorrect'] : [result.expected];
+      expect(exp, result.id).toContain(result.status);
+    }
     expect(result.comparisons[0].text).toBe(cases.find(item => item.id === result.id).premise);
   }
   const assets = await page.evaluate(async () => {
@@ -49,17 +52,18 @@ test('real model: Swedish evaluation, asset cache, and local-only inference', as
     client.stop();
     return result;
   });
-  expect(warm.status).toBe('supported');
+  expect(['supported', 'correct']).toContain(warm.status);
 });
 
 // A label is wrong when it points the reader the wrong way. A correct claim
 // must never read as contradicted or unsupported; a misleading, incorrect or
 // nonsensical claim must never read as supported. Abstention is always allowed.
 const FORBIDDEN = {
-  correct: ['contradiction', 'missing'],
-  misleading: ['supported'],
-  incorrect: ['supported'],
-  nonsensical: ['supported', 'contradiction'],
+  correct: ['contradiction', 'incorrect', 'misleading', 'missing'],
+  misleading: ['supported', 'correct'],
+  incorrect: ['supported', 'correct'],
+  nonsensical: ['supported', 'correct', 'contradiction', 'incorrect'],
+  missing: ['supported', 'correct'],
 };
 
 test('real model: corpus claims about statutes and judgments never receive a wrong label', async ({ page }, testInfo) => {
@@ -101,6 +105,7 @@ test('real model: corpus claims about statutes and judgments never receive a wro
   expect(judgment.result.comparisons.some(p => p.role === 'summary')).toBe(true);
   expect(judgment.result.comparisons.some(p => p.role === 'decision')).toBe(true);
   expect(results.find(item => item.id === 'guarantee').result.comparisons.length).toBe(2);
+  expect(results.find(item => item.id === 'guarantee').result.status).toBe('missing');
   // Every assessable judgment claim compares only the attributed court's own text.
   for (const { id, evidence, result } of results.filter(item => item.evidence.authority && item.result.comparisons.length)) {
     expect(result.comparisons.every(p => p.court === evidence.authority), id).toBe(true);

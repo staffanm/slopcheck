@@ -39,7 +39,7 @@ self.onmessage = async ({ data }) => {
         convertImage: mammoth.images.imgElement(() => Promise.resolve({ src: '' })),
       });
       result = { html: converted.value, warnings: converted.messages.length ? ['Word-filen innehåller formatering som inte kunde läsas fullständigt. Kontrollera dokumenttexten i rapporten.'] : [] };
-    } else if (data.type === 'evidence') result = selectEvidence(data.markdown, data.uri, data.claim);
+    } else if (data.type === 'evidence') result = selectEvidence(data.markdown, data.uri, data.claim, data.anchors);
     else throw new Error('Okänd dokumentåtgärd.');
     self.postMessage({ id: data.id, result });
   } catch (error) {

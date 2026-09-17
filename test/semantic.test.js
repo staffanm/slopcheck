@@ -19,7 +19,7 @@ function claim(text, extra = {}) {
 }
 
 test('claims preserve negation, select semicolon clauses, and remove citation signals', () => {
-  assert.equal(claim('Ett sent svar ska inte räknas som ett nytt anbud (se 4 § avtalslagen).').hypothesis, 'Ett sent svar ska inte räknas som ett nytt anbud');
+  assert.equal(claim('Ett sent svar ska inte räknas som ett nytt anbud (se 4 § avtalslagen).').hypothesis, 'Ett sent svar ska inte räknas som ett nytt anbud.');
   const second = claim('Det första avtalet är giltigt; ett sent svar ska räknas som ett nytt anbud enligt 4 § avtalslagen.');
   assert.equal(second.assessable, true);
   assert.doesNotMatch(second.hypothesis, /första avtalet|avtalslagen/);
@@ -46,8 +46,8 @@ test('a citation-only paragraph uses the preceding sentence without changing doc
 test('label policy abstains on uncertain, conflicting and incomplete evidence', () => {
   const yes = comparison('Avsnitt A', scores(.99, .005, .005));
   const no = comparison('Avsnitt B', scores(.005, .005, .99));
-  assert.equal(semanticResult([yes]).status, 'supported');
-  assert.equal(semanticResult([no]).status, 'contradiction');
+  assert.equal(semanticResult([yes]).status, 'correct');
+  assert.equal(semanticResult([no]).status, 'incorrect');
   assert.equal(semanticResult([yes, no]).status, 'abstain');
   assert.equal(semanticResult([yes], { incomplete: true }).status, 'abstain');
   assert.equal(semanticResult([]).status, 'abstain');
@@ -55,6 +55,13 @@ test('label policy abstains on uncertain, conflicting and incomplete evidence', 
   const missing = semanticResult([comparison('Orelaterad text', scores(.01, .98, .01))]);
   assert.equal(missing.status, 'missing');
   assert.equal(missing.evidence.text, 'Orelaterad text');
+  const missingExact = semanticResult([comparison('4 § 1 st', scores(.07, .63, .30)), comparison('4 § 2 st', scores(.36, .33, .31))], { exact: true });
+  assert.equal(missingExact.status, 'missing');
+  assert.equal(missingExact.evidence.text, '4 § 1 st');
+  const missingNonExact = semanticResult([comparison('4 § 1 st', scores(.07, .63, .30)), comparison('4 § 2 st', scores(.36, .33, .31))], { exact: false });
+  assert.equal(missingNonExact.status, 'abstain');
+  const archaicExact = semanticResult([comparison('10 kap. 9 § handelsbalken', scores(.13, .52, .35))], { exact: true });
+  assert.equal(archaicExact.status, 'abstain');
   assert.throws(() => scoresFromLogits([0, NaN, 1]));
   assert.equal(scoresFromLogits([1000, 0, 0]).entailment, 1);
 });
@@ -75,10 +82,10 @@ test('tokenized pairs use premise first and never truncate either input', () => 
 });
 
 test('multiple targets and semantic filters do not change source validity', () => {
-  const row = { semantic: new Map([['a', { status: 'supported' }], ['b', { status: 'abstain' }]]) };
+  const row = { semantic: new Map([['a', { status: 'correct' }], ['b', { status: 'abstain' }]]) };
   assert.equal(rowSemantic(row), 'abstain');
-  assert.equal(matchesFilter('found', 'found', 'contradiction'), true);
-  assert.equal(matchesFilter('review', 'found', 'contradiction'), true);
-  assert.equal(matchesFilter('invalid', 'found', 'contradiction'), false);
+  assert.equal(matchesFilter('found', 'found', 'incorrect'), true);
+  assert.equal(matchesFilter('review', 'found', 'incorrect'), true);
+  assert.equal(matchesFilter('invalid', 'found', 'incorrect'), false);
   assert.equal(matchesFilter('unassessed', 'invalid', 'abstain'), true);
 });

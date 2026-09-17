@@ -15,11 +15,11 @@ export function semanticClient(onProgress) {
       worker = new Worker(new URL('./semantic.worker.js', import.meta.url), { type: 'module' });
       worker.onmessage = ({ data }) => {
         if (data.id !== job?.id) return;
-        if (data.progress) return onProgress(data.progress);
+        if (data.progress && typeof onProgress === 'function') return onProgress(data.progress);
         if (data.error) job.reject(new Error(data.error));
         else job.resolve(data.result);
       };
-      worker.onerror = () => stop(new Error('Den lokala modellen kunde inte starta.'));
+      worker.onerror = event => stop(new Error(`Den lokala modellen kunde inte starta: ${event.message || 'okänt fel'}`));
     }
     const timeout = setTimeout(() => stop(new Error('Den lokala jämförelsen tog mer än två minuter.')), 120000);
     const abort = () => stop(signal.reason);

@@ -5,7 +5,7 @@ import cases from './fixtures/legal-claims.json' with { type: 'json' };
 import { claimContext, selectEvidence, plainText } from '../src/analysis.js';
 import { semanticClaim, semanticResult } from '../src/semantic.js';
 
-const KINDS = ['correct', 'misleading', 'incorrect', 'nonsensical'];
+const KINDS = ['correct', 'misleading', 'incorrect', 'nonsensical', 'missing'];
 
 function input(item) {
   const start = item.text.indexOf(item.citation);
@@ -51,8 +51,8 @@ test('identical lower-court text cannot support a claim attributed to HD', () =>
   assert.equal(selectEvidence(claim.text, cases[1].uri, claim).passages.length, 0);
   const yes = { scores: { entailment: .99, neutral: .005, contradiction: .005 } };
   assert.equal(semanticResult([{ ...yes, role: 'reasoning' }], evidence).status, 'abstain');
-  assert.equal(semanticResult([{ ...yes, role: 'decision' }], evidence).status, 'supported');
-  assert.equal(semanticResult([{ ...yes, role: 'summary' }], evidence).status, 'supported');
+  assert.equal(semanticResult([{ ...yes, role: 'decision' }], evidence).status, 'correct');
+  assert.equal(semanticResult([{ ...yes, role: 'summary' }], evidence).status, 'correct');
 });
 
 test('source passages preserve long sentences instead of cutting off their conditions', () => {
@@ -64,7 +64,7 @@ test('source passages preserve long sentences instead of cutting off their condi
 test('every corpus claim has a kind, a frozen source, and a hypothesis without the citation', () => {
   assert.ok(cases.length >= 60);
   assert.equal(new Set(cases.map(item => item.id)).size, cases.length);
-  for (const kind of KINDS) assert.ok(cases.filter(item => item.kind === kind).length >= 5, kind);
+  for (const kind of KINDS) assert.ok(cases.filter(item => item.kind === kind).length >= (kind === 'missing' ? 1 : 5), kind);
   for (const item of cases) {
     assert.ok(KINDS.includes(item.kind), item.id);
     assert.ok(item.text.includes(item.citation), item.id);

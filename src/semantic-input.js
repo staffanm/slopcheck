@@ -1,3 +1,5 @@
+import { sentenceSegments } from './analysis.js';
+
 // Never truncate a premise or hypothesis: doing so can remove an exception or
 // negation. Retain the exact sentence text shown in the report.
 export function modelPassages(passages, tokenizer) {
@@ -9,7 +11,7 @@ export function modelPassages(passages, tokenizer) {
       result.push(passage);
       continue;
     }
-    const sentences = [...new Intl.Segmenter('sv', { granularity: 'sentence' }).segment(passage.text)].map(item => item.segment);
+    const sentences = sentenceSegments(passage.text).map(item => item.segment);
     for (let start = 0; start < sentences.length;) {
       let end = start;
       let text = '';

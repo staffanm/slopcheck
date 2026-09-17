@@ -5,3 +5,6 @@ playwright-report/
 __pycache__/
 *.pyc
 .DS_Store
+
+# Real-world court documents with PII (kept local only)
+Eskilstuna TR T 667-25*.pdf
