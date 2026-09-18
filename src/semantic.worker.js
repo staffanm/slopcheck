@@ -5,6 +5,7 @@ import wasmModuleUrl from 'onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs?url';
 import manifest from './model-manifest.json';
 import { MODEL_VERSION, scoresFromLogits, semanticResult } from './semantic.js';
 import { modelPassages, pairInput } from './semantic-input.js';
+import { sha256Hex } from './sha256.js';
 
 env.wasm.numThreads = 1; // Works on static hosts without cross-origin isolation.
 env.wasm.wasmPaths = { wasm: wasmUrl, mjs: wasmModuleUrl };
@@ -26,7 +27,7 @@ async function asset(base, name) {
     if (!response.ok) throw new Error(`Modellfilen kunde inte hämtas (${response.status}).`);
   }
   const bytes = await response.arrayBuffer();
-  const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+  const digest = await sha256Hex(bytes);
   if (bytes.byteLength !== manifest.files[name].bytes || digest !== manifest.files[name].sha256) {
     await cache?.delete(url);
     throw new Error('Modellfilen stämmer inte med den publicerade versionen.');

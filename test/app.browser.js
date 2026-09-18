@@ -27,6 +27,25 @@ async function mockApi(page, { failResolve = false, sourceText = source } = {}) 
       await route.fulfill({ json: uri === invalidUri ? { results: [], recognized: [{ uri, invalid: true }] } : {
         results: [{ uri: uri.split('#')[0], display: 'Källa', pin: { uri, label: uri === procedureUri ? '18 kap. 7 §' : '4 §' } }], recognized: [],
       } });
+    } else if (url.pathname.includes('/range/')) {
+      if (failResolve) return route.abort('internetdisconnected');
+      await route.fulfill({
+        headers: { 'Content-Type': 'text/plain' },
+        body: '89ed57a135674719\ne760f4788dea8a3c\n',
+      });
+    } else if (url.pathname.includes('/packs/')) {
+      await route.fulfill({
+        json: {
+          pack: 'core',
+          documents: {
+            'https://lagen.nu/1915:218': {
+              title: 'Avtalslagen',
+              markdown: sourceText,
+              anchors: { P4: [0, sourceText.length] },
+            },
+          },
+        },
+      });
     } else await route.fulfill({ json: { markdown: sourceText } });
   });
   return requests;
@@ -282,7 +301,8 @@ test('local privacy mode extracts citations without sending document text to API
   await expect(page.locator('#progress')).toBeHidden({ timeout: 45000 });
   await expect(page.locator('.citation-mark.found')).toHaveCount(1);
   expect(requests.filter(r => r.method() === 'POST')).toHaveLength(0);
-  expect(requests.filter(r => r.url().includes('/resolve?'))).toHaveLength(1);
+  expect(requests.filter(r => r.url().includes('/resolve?'))).toHaveLength(0);
+  expect(requests.filter(r => r.url().includes('/range/')).length).toBeGreaterThanOrEqual(1);
   await expect(page.locator('#report-meta')).toContainText('Lokal identifiering');
 });
 

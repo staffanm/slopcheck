@@ -19,6 +19,11 @@ export async function request(path, { signal, ...options } = {}) {
       const messages = { 413: 'Texten är för stor.', 415: 'API:t godtar inte formatet.', 422: 'API:t kunde inte läsa textblocken.', 404: 'Källtexten saknas i lagen.nu.' };
       throw new Error(messages[response.status] ?? `lagen.nu svarar med HTTP ${response.status}. Försök igen.`);
     }
+    if (options.responseType === 'text') return response.text();
+    if (options.responseType === 'arrayBuffer') return response.arrayBuffer();
+    const contentType = response.headers.get('content-type') ?? '';
+    if (contentType.includes('application/json')) return response.json();
+    if (contentType.includes('text/')) return response.text();
     return response.json();
   }
 }

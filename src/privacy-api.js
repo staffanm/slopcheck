@@ -1,25 +1,70 @@
 import { API, request, resolveTarget } from './api.js';
 import { NAMEDLAWS_DATA } from './lagrum/datasets.js';
+import {
+  OHTTP_CONFIG,
+  ohttpFetch,
+} from './ohttp.js';
 
-// Set of core SFS numbers (promulgated in NAMEDLAWS_DATA) that belong in the Core Statute Pack
-const CORE_SFS = new Set(Object.values(NAMEDLAWS_DATA?.current ?? {}).map(s => s.split(' ')[0]));
+export { OHTTP_CONFIG, ohttpFetch };
+
+// Top-cited SFS statutes in the Core Statute Pack (top 250 in catalog.sqlite)
+const CORE_SFS = new Set([
+  '1736:0123_2', '1891:35_s.1', '1915:218', '1920:405', '1921:225', '1928:370', '1942:740', '1947:576',
+  '1949:105', '1949:381', '1953:272', '1956:623', '1957:297', '1958:637', '1960:729', '1962:381',
+  '1962:700', '1964:167', '1967:837', '1968:64', '1969:387', '1970:979', '1970:988', '1970:994',
+  '1971:289', '1971:291', '1971:69', '1971:948', '1972:207', '1972:429', '1972:620', '1972:719',
+  '1973:1149', '1973:1173', '1973:289', '1973:349', '1973:90', '1974:152', '1974:371', '1975:1385',
+  '1975:1418', '1975:635', '1976:125', '1976:580', '1977:1160', '1977:179', '1977:480', '1979:1152',
+  '1979:230', '1979:429', '1980:100', '1980:620', '1981:774', '1982:673', '1982:713', '1982:763',
+  '1982:80', '1984:387', '1985:1100', '1985:125', '1986:223', '1987:10', '1987:230', '1987:259',
+  '1987:619', '1987:667', '1987:672', '1988:534', '1988:870', '1988:950', '1989:529', '1990:324',
+  '1990:52', '1990:782', '1990:931', '1991:1128', '1991:1129', '1991:1469', '1991:45', '1991:481',
+  '1991:614', '1991:900', '1992:1434', '1992:859', '1993:100', '1993:1617', '1993:20', '1993:387',
+  '1993:581', '1993:787', '1993:891', '1994:1000', '1994:1009', '1994:1564', '1994:1738', '1994:1776',
+  '1994:200', '1995:1554', '1995:450', '1995:584', '1996:242', '1996:67', '1997:238', '1997:483',
+  '1997:857', '1998:1474', '1998:204', '1998:488', '1998:620', '1998:808', '1999:1078', '1999:1229',
+  '1999:1395', '2000:1225', '2000:980', '2001:453', '2002:160', '2003:389', '2004:168', '2004:297',
+  '2004:46', '2004:519', '2005:104', '2005:551', '2005:716', '2007:1091', '2007:1244', '2007:515',
+  '2007:528', '2008:355', '2008:486', '2008:567', '2008:579', '2009:366', '2009:400', '2010:110',
+  '2010:1622', '2010:2039', '2010:2043', '2010:361', '2010:610', '2010:659', '2010:696', '2010:751',
+  '2010:800', '2010:900', '2011:1244', '2011:203', '2014:801', '2015:315', '2016:1145', '2016:1146',
+  '2017:30', '2017:630', '2017:725', '2017:900', '2018:1138', '2018:1177', '2018:218', '2018:585',
+  '2025:400',
+]);
 
 // In-memory caches for range buckets and packs
 export const rangeBucketCache = new Map();
 export const packCache = new Map();
 export const documentCache = new Map();
 
-// Configuration for OHTTP relay
-export const OHTTP_CONFIG = {
-  enabled: false,
-  relayUrl: null, // e.g. 'https://privacy-gateway.cloudflare.com/relay'
-  get gatewayUrl() {
-    return this._gatewayUrl ?? `${API}/ohttp-gateway`;
-  },
-  set gatewayUrl(url) {
-    this._gatewayUrl = url;
-  },
-};
+const PACK_CACHE_NAME = 'slopcheck-packs-v1';
+
+export async function getPackFromCache(packId) {
+  if (typeof caches === 'undefined') return null;
+  try {
+    const cache = await caches.open(PACK_CACHE_NAME);
+    const match = await cache.match(`/packs/${packId}`);
+    if (match) {
+      return match.json();
+    }
+  } catch {
+    // CacheStorage can throw in restricted contexts
+  }
+  return null;
+}
+
+export async function putPackInCache(packId, packData) {
+  if (typeof caches === 'undefined') return;
+  try {
+    const cache = await caches.open(PACK_CACHE_NAME);
+    const response = new Response(JSON.stringify(packData), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    await cache.put(`/packs/${packId}`, response);
+  } catch {
+    // Ignore cache write errors
+  }
+}
 
 export function canonicalUri(uri) {
   if (!uri) return '';
@@ -31,13 +76,9 @@ export function canonicalUri(uri) {
   }
 }
 
-export async function sha256Hex(text) {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(text);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-}
+import { sha256Hex } from './sha256.js';
+
+export { sha256Hex };
 
 export function splitHash(hash, prefixLength = 3, suffixLength = 16) {
   return {
@@ -56,15 +97,16 @@ export function rootPrefix(hash, length = 3) {
 
 /**
  * Deterministically maps a canonical legal URI to its static volume pack identifier.
+ * Follows ferenda/lib/packs.py contract.
  */
-export function packIdForUri(uri) {
+export function packIdForUri(uri, { ignoreCore = false } = {}) {
   const clean = (uri || '').split('#')[0].trim();
-  
+
   // 1. SFS acts (Lag / förordning)
   const sfsMatch = /^https:\/\/lagen\.nu\/(\d{4}):(\d+)/i.exec(clean);
   if (sfsMatch) {
     const sfsId = `${sfsMatch[1]}:${sfsMatch[2]}`;
-    if (CORE_SFS.has(sfsId)) {
+    if (!ignoreCore && CORE_SFS.has(sfsId)) {
       return 'core';
     }
     const decade = sfsMatch[1].slice(0, 3) + '0s';
@@ -89,28 +131,34 @@ export function packIdForUri(uri) {
   }
 
   // 4. CELEX / EU Acquis (regulations, directives, CJEU case law sector 6, etc.)
-  // e.g. https://lagen.nu/celex/32016R0679 or https://lagen.nu/celex/62015CJ0123
-  const celexMatch = /^https:\/\/lagen\.nu\/celex\/[0-9](\d{4})/i.exec(clean);
+  // e.g. https://lagen.nu/celex/12012M/TXT, https://lagen.nu/celex/32016R0679, https://lagen.nu/celex/62015CJ0123
+  const celexMatch = /^https:\/\/lagen\.nu\/celex\/([0-9])(\d{4})/i.exec(clean);
   if (celexMatch) {
-    return `celex/${celexMatch[1]}`;
+    const sector = celexMatch[1];
+    const year = celexMatch[2];
+    if (sector === '1') {
+      return 'celex/1';
+    }
+    return `celex/${sector}/${year}`;
   }
 
-  // 5. Förarbeten: Propositioner (prop), SOU, Ds
-  const propMatch = /^https:\/\/lagen\.nu\/prop\/(\d{4})/i.exec(clean);
+  // 5. Förarbeten: Propositioner (prop), SOU, Ds, Betänkanden
+  const propMatch = /^https:\/\/lagen\.nu\/prop\/(\d{4}(?:[-/]\d{2,4})?)/i.exec(clean);
   if (propMatch) {
-    const year = parseInt(propMatch[1], 10);
-    const startYear = Math.floor(year / 5) * 5;
-    return `prop/${startYear}-${startYear + 4}`;
+    const sess = propMatch[1].replace('/', '-');
+    return `prop/${sess}`;
   }
   const souMatch = /^https:\/\/lagen\.nu\/sou\/(\d{4}):/i.exec(clean);
   if (souMatch) {
-    const decade = souMatch[1].slice(0, 3) + '0s';
-    return `sou/${decade}`;
+    return `sou/${souMatch[1]}`;
   }
   const dsMatch = /^https:\/\/lagen\.nu\/ds\/(\d{4}):/i.exec(clean);
   if (dsMatch) {
-    const decade = dsMatch[1].slice(0, 3) + '0s';
-    return `ds/${decade}`;
+    return `ds/${dsMatch[1]}`;
+  }
+  const forarbeteMatch = /^https:\/\/lagen\.nu\/([a-z]+)\/(\d{4}):/i.exec(clean);
+  if (forarbeteMatch) {
+    return `${forarbeteMatch[1].toLowerCase()}/${forarbeteMatch[2]}`;
   }
 
   return 'other';
@@ -145,7 +193,10 @@ export async function fetchRangeBucket(prefix, signal, { ohttp = OHTTP_CONFIG.en
     // Fire decoys in the background without awaiting them
     for (const decoy of decoys) {
       if (!rangeBucketCache.has(decoy)) {
-        request(`range/${decoy}`, { signal }).then(res => {
+        const fetcher = ohttp
+          ? ohttpFetch(`range/${decoy}`, { signal, headers: { accept: 'text/plain' } }).then(r => r.text())
+          : request(`range/${decoy}`, { signal, headers: { accept: 'text/plain, application/json' } });
+        fetcher.then(res => {
           parseBucketResponse(res);
         }).catch(() => {});
       }
@@ -154,7 +205,9 @@ export async function fetchRangeBucket(prefix, signal, { ohttp = OHTTP_CONFIG.en
 
   const promise = (async () => {
     try {
-      const response = await request(`range/${normPrefix}`, { signal });
+      const response = ohttp
+        ? await ohttpFetch(`range/${normPrefix}`, { signal, headers: { accept: 'text/plain' } }).then(r => r.text())
+        : await request(`range/${normPrefix}`, { signal, headers: { accept: 'text/plain, application/json' } });
       return parseBucketResponse(response);
     } catch (err) {
       rangeBucketCache.delete(normPrefix);
@@ -166,7 +219,7 @@ export async function fetchRangeBucket(prefix, signal, { ohttp = OHTTP_CONFIG.en
   return promise;
 }
 
-function parseBucketResponse(data) {
+export function parseBucketResponse(data) {
   const suffixes = new Set();
   if (typeof data === 'string') {
     for (const line of data.split('\n')) {
@@ -206,13 +259,85 @@ export function isDeterministicAbsence(uri) {
   return false;
 }
 
+export function formatPinLabel(fragment) {
+  if (!fragment) return '';
+  const clean = fragment.replace(/^#/, '');
+  const kpMatch = /^K(\d+[a-z]?)P(\d+[a-z]?)$/i.exec(clean);
+  if (kpMatch) {
+    const k = kpMatch[1].replace(/([a-z]+)/i, ' $1');
+    const p = kpMatch[2].replace(/([a-z]+)/i, ' $1');
+    return `${k} kap. ${p} §`;
+  }
+  const pMatch = /^P(\d+[a-z]?)$/i.exec(clean);
+  if (pMatch) {
+    const p = pMatch[1].replace(/([a-z]+)/i, ' $1');
+    return `${p} §`;
+  }
+  const kMatch = /^K(\d+[a-z]?)$/i.exec(clean);
+  if (kMatch) {
+    const k = kMatch[1].replace(/([a-z]+)/i, ' $1');
+    return `${k} kap.`;
+  }
+  const sidMatch = /^sid(\d+)$/i.exec(clean);
+  if (sidMatch) {
+    return `s. ${sidMatch[1]}`;
+  }
+  const recitalMatch = /^recital-(\d+)$/i.exec(clean);
+  if (recitalMatch) {
+    return `skäl ${recitalMatch[1]}`;
+  }
+  if (/^\d+(\.\d+)*$/.test(clean)) {
+    return `art. ${clean}`;
+  }
+  return clean;
+}
+
+export function formatDisplayTitle(rootUri) {
+  if (!rootUri) return '';
+  const clean = rootUri.trim().replace(/\/$/, '');
+
+  // SFS
+  const sfsMatch = /^https:\/\/lagen\.nu\/(\d{4}):(\d+)$/i.exec(clean);
+  if (sfsMatch) {
+    const sfsId = `${sfsMatch[1]}:${sfsMatch[2]}`;
+    if (NAMEDLAWS_DATA?.current) {
+      for (const [name, sfs] of Object.entries(NAMEDLAWS_DATA.current)) {
+        if (sfs === sfsId || sfs.startsWith(sfsId + ' ')) {
+          return name.charAt(0).toUpperCase() + name.slice(1);
+        }
+      }
+    }
+    return `Lag (${sfsId})`;
+  }
+
+  // NJA
+  const njaMatch = /^https:\/\/lagen\.nu\/dom\/nja\/(\d{4})s(\d+)$/i.exec(clean);
+  if (njaMatch) {
+    return `NJA ${njaMatch[1]} s. ${njaMatch[2]}`;
+  }
+
+  // HFD
+  const hfdMatch = /^https:\/\/lagen\.nu\/dom\/hfd\/(\d{4}):(\d+)$/i.exec(clean);
+  if (hfdMatch) {
+    return `HFD ${hfdMatch[1]} ref. ${hfdMatch[2]}`;
+  }
+
+  // Prop
+  const propMatch = /^https:\/\/lagen\.nu\/prop\/(.+)$/i.exec(clean);
+  if (propMatch) {
+    return `Prop. ${propMatch[1]}`;
+  }
+
+  return clean.split('/').pop() || clean;
+}
+
 /**
  * Resolves a citation URI anonymously via k-anonymity range lookup in a SINGLE round-trip.
  * Bucket prefix is sha256(root_uri)[:3]. The bucket co-locates the parent document and all its pinpoints.
  * Suffixes are truncated to 16 hex characters (64 bits).
  * Falls back to direct resolve if the range endpoint is not yet supported on the backend.
  */
-export async function resolveTargetPrivate(uri, signal, { fallbackToResolve = true, sendDecoys = false } = {}) {
+export async function resolveTargetPrivate(uri, signal, { fallbackToResolve = false, sendDecoys = false } = {}) {
   const canonical = canonicalUri(uri);
   const rootUri = canonical.split('#')[0];
   const rootHash = await sha256Hex(rootUri);
@@ -223,7 +348,6 @@ export async function resolveTargetPrivate(uri, signal, { fallbackToResolve = tr
   try {
     bucket = await fetchRangeBucket(prefix, signal, { sendDecoys });
   } catch (error) {
-    // If range endpoint returns 404/not implemented, seamlessly fall back to direct resolve
     if (fallbackToResolve) {
       return resolveTarget(uri, signal);
     }
@@ -232,19 +356,21 @@ export async function resolveTargetPrivate(uri, signal, { fallbackToResolve = tr
 
   const rootFound = bucket.has(rootSuffix) || CORE_SFS.has(rootUri.split('/').pop());
   const hasPinpoint = canonical.includes('#');
+  const displayTitle = formatDisplayTitle(rootUri);
+  const identifier = rootUri.split('/').pop();
 
   // If citation has no pinpoint, result is direct
   if (!hasPinpoint) {
     if (rootFound) {
       return {
         status: 'found',
-        result: { uri: rootUri, identifier: rootUri.split('/').pop() }
+        result: { uri: rootUri, identifier, display: displayTitle, title: displayTitle },
       };
     }
     const isInvalid = isDeterministicAbsence(rootUri);
     return {
       status: isInvalid ? 'invalid' : 'unconfirmed',
-      result: undefined
+      result: undefined,
     };
   }
 
@@ -254,13 +380,16 @@ export async function resolveTargetPrivate(uri, signal, { fallbackToResolve = tr
   const targetFound = bucket.has(targetSuffix);
 
   if (targetFound) {
+    const fragment = canonical.split('#')[1];
     return {
       status: 'found',
       result: {
         uri: rootUri,
-        pin: { uri: canonical, label: canonical.split('#')[1] },
-        identifier: rootUri.split('/').pop()
-      }
+        display: displayTitle,
+        title: displayTitle,
+        pin: { uri: canonical, label: formatPinLabel(fragment) },
+        identifier,
+      },
     };
   }
 
@@ -269,7 +398,7 @@ export async function resolveTargetPrivate(uri, signal, { fallbackToResolve = tr
     return {
       status: 'invalid',
       result: undefined,
-      reason: 'Bestämmelsen saknas i författningen.'
+      reason: 'Bestämmelsen saknas i författningen.',
     };
   }
 
@@ -277,8 +406,142 @@ export async function resolveTargetPrivate(uri, signal, { fallbackToResolve = tr
   const isInvalid = isDeterministicAbsence(rootUri);
   return {
     status: isInvalid ? 'invalid' : 'unconfirmed',
-    result: undefined
+    result: undefined,
   };
+}
+
+export function inlineRunsToText(runs) {
+  if (!runs) return '';
+  if (typeof runs === 'string') return runs;
+  if (Array.isArray(runs)) {
+    return runs.map(run => {
+      if (typeof run === 'string') return run;
+      if (run && typeof run === 'object') {
+        const text = run.text || '';
+        const uri = run.uri;
+        if (uri && text) {
+          return `[${text}](${uri})`;
+        }
+        return text;
+      }
+      return '';
+    }).join('');
+  }
+  return '';
+}
+
+/**
+ * Converts a raw JSON artifact AST into markdown and an anchor offset map.
+ */
+export function artifactToMarkdown(art) {
+  if (!art) return { markdown: '', anchors: {} };
+  if (typeof art === 'string') return { markdown: art, anchors: {} };
+  if (art.markdown) {
+    return { markdown: art.markdown, anchors: art.anchors || {}, title: art.title || '' };
+  }
+
+  const title = art.title
+    || art.metadata?.properties?.['dcterms:title']
+    || art.metadata?.properties?.['dcterms:identifier']
+    || art.label
+    || '';
+
+  const anchors = {};
+  const chunks = [];
+  let currentLen = 0;
+
+  function appendChunk(text) {
+    if (!text) return;
+    chunks.push(text);
+    currentLen += text.length;
+  }
+
+  if (title) {
+    appendChunk(`# ${title}\n\n`);
+  }
+
+  function walk(node, depth = 1) {
+    if (!node || typeof node !== 'object') return;
+    const type = node.type || '';
+    const id = node.id;
+    const startIndex = currentLen;
+
+    const bodyRuns = node.text || '';
+    const body = inlineRunsToText(bodyRuns).trim();
+
+    if (type === 'rubrik' || type === 'heading') {
+      const hDepth = Math.min(6, (node.depth || depth) + 1);
+      appendChunk(`${'#'.repeat(hDepth)} ${body}\n\n`);
+    } else if (type === 'avdelning' || type === 'kapitel') {
+      const heading = node.rubrik ? inlineRunsToText(node.rubrik).trim() : body;
+      const num = node.num ? `${node.num} kap.` : '';
+      const hTitle = [num, heading].filter(Boolean).join(' ');
+      if (hTitle) appendChunk(`## ${hTitle}\n\n`);
+      if (node.children) {
+        for (const child of node.children) walk(child, depth + 1);
+      }
+    } else if (type === 'paragraf') {
+      const bet = node.beteckning || (node.num ? `${node.num} §` : '');
+      if (bet) {
+        appendChunk(`**${bet}** `);
+      }
+      if (body) {
+        appendChunk(`${body}\n\n`);
+      }
+      if (node.children) {
+        for (const child of node.children) walk(child, depth + 1);
+      }
+      if (!body && !node.children?.length) {
+        appendChunk('\n\n');
+      }
+    } else if (type === 'stycke' || type === 'paragraph') {
+      const bet = node.beteckning ? `**${node.beteckning}** ` : (node.num ? `${node.num}. ` : '');
+      appendChunk(`${bet}${body}\n\n`);
+      if (node.children) {
+        for (const child of node.children) walk(child, depth + 1);
+      }
+    } else if (type === 'punkt' || type === 'point') {
+      const num = node.ordinal || node.num;
+      const marker = num ? `${num}. ` : '- ';
+      appendChunk(`${marker}${body}\n\n`);
+      if (node.children) {
+        for (const child of node.children) walk(child, depth + 1);
+      }
+    } else if (type === 'article') {
+      const num = node.num ? `Artikel ${node.num}` : '';
+      if (num) appendChunk(`## ${num}\n\n`);
+      if (body) appendChunk(`${body}\n\n`);
+      if (node.children) {
+        for (const child of node.children) walk(child, depth + 1);
+      }
+    } else if (type === 'recital') {
+      const num = node.num ? `(${node.num}) ` : '';
+      appendChunk(`${num}${body}\n\n`);
+    } else {
+      if (body) {
+        appendChunk(`${body}\n\n`);
+      }
+      if (node.children) {
+        for (const child of node.children) walk(child, depth + 1);
+      }
+    }
+
+    const endIndex = currentLen;
+    if (id) {
+      anchors[id] = [startIndex, endIndex];
+      if (/^P\d+[a-z]?$/i.test(id)) {
+        anchors[id.toUpperCase()] = [startIndex, endIndex];
+      }
+    }
+  }
+
+  const nodes = art.structure || art.body || art.children || [];
+  for (const node of nodes) {
+    walk(node, 1);
+  }
+
+  const markdown = chunks.join('');
+  return { markdown, anchors, title };
 }
 
 /**
@@ -304,6 +567,7 @@ export function getProvisionText(docData, uri) {
 
 /**
  * Loads a static volume pack (e.g. "core" or "sfs/2010s").
+ * Uses browser CacheStorage when available.
  */
 export async function loadPack(packId, signal) {
   if (packCache.has(packId)) {
@@ -312,9 +576,44 @@ export async function loadPack(packId, signal) {
 
   const promise = (async () => {
     try {
-      const data = await request(`packs/${packId}`, { signal });
+      let data = await getPackFromCache(packId);
+      if (!data) {
+        if (OHTTP_CONFIG.enabled) {
+          const res = await ohttpFetch(`packs/${packId}`, { signal });
+          data = res.json();
+          await putPackInCache(packId, data);
+        } else {
+          if (typeof caches !== 'undefined') {
+            try {
+              const res = await fetch(`${API}/packs/${packId}`, {
+                signal,
+                credentials: 'omit',
+                referrerPolicy: 'no-referrer',
+              });
+              if (res.ok) {
+                const cache = await caches.open(PACK_CACHE_NAME);
+                await cache.put(`/packs/${packId}`, res.clone());
+                data = await res.json();
+              }
+            } catch {
+              // Fall through to request()
+            }
+          }
+          if (!data) {
+            data = await request(`packs/${packId}`, { signal });
+            await putPackInCache(packId, data);
+          }
+        }
+      }
+
       if (data && typeof data.documents === 'object') {
         for (const [docUri, docData] of Object.entries(data.documents)) {
+          if (docData && typeof docData === 'object' && !docData.markdown) {
+            const converted = artifactToMarkdown(docData);
+            docData.markdown = converted.markdown;
+            docData.anchors = converted.anchors;
+            docData.title = docData.title || converted.title;
+          }
           documentCache.set(canonicalUri(docUri), docData);
         }
       }
@@ -327,6 +626,17 @@ export async function loadPack(packId, signal) {
 
   packCache.set(packId, promise);
   return promise;
+}
+
+/**
+ * Pre-fetches the Core Statute Pack in the background during initialization.
+ */
+export async function prefetchCorePack(signal) {
+  try {
+    return await loadPack('core', signal);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -348,13 +658,29 @@ export async function getDocumentSource(uri, signal, { privacyMode = false } = {
       if (documentCache.has(rootUri)) {
         return documentCache.get(rootUri);
       }
+      // If packId was 'core' but the document was not included, try its era volume pack
+      if (packId === 'core') {
+        const volumePackId = packIdForUri(rootUri, { ignoreCore: true });
+        if (volumePackId && volumePackId !== 'core') {
+          await loadPack(volumePackId, signal);
+          if (documentCache.has(rootUri)) {
+            return documentCache.get(rootUri);
+          }
+        }
+      }
     } catch {
-      // Pack endpoint not available yet or missing; fall back to direct document fetch
+      // Pack endpoint not available or missing; fall back to direct document fetch
     }
   }
 
   // 3. Fallback to direct document fetch
   const response = await request(`document?${new URLSearchParams({ uri: rootUri, format: 'md' })}`, { signal });
+  if (response && typeof response === 'object' && !response.markdown) {
+    const converted = artifactToMarkdown(response);
+    response.markdown = converted.markdown;
+    response.anchors = converted.anchors;
+    response.title = response.title || converted.title;
+  }
   documentCache.set(rootUri, response);
   return response;
 }

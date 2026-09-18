@@ -71,16 +71,17 @@ test('packIdForUri deterministically maps URIs to core and volume packs', () => 
   assert.equal(packIdForUri('https://lagen.nu/dom/ad/2018:3'), 'dom/ad/2015-2019');
   assert.equal(packIdForUri('https://lagen.nu/dom/rh/2011:4'), 'dom/rh/2010-2014');
 
-  // CELEX EU acts (yearly volume packs)
-  assert.equal(packIdForUri('https://lagen.nu/celex/32016R0679#32'), 'celex/2016');
-  assert.equal(packIdForUri('https://lagen.nu/celex/32024R1689'), 'celex/2024');
-  assert.equal(packIdForUri('https://lagen.nu/celex/62015CJ0123'), 'celex/2015');
+  // CELEX EU acts (sector + year volume packs, or celex/1)
+  assert.equal(packIdForUri('https://lagen.nu/celex/32016R0679#32'), 'celex/3/2016');
+  assert.equal(packIdForUri('https://lagen.nu/celex/32024R1689'), 'celex/3/2024');
+  assert.equal(packIdForUri('https://lagen.nu/celex/62015CJ0123'), 'celex/6/2015');
+  assert.equal(packIdForUri('https://lagen.nu/celex/12012M/TXT'), 'celex/1');
 
   // Förarbeten
-  assert.equal(packIdForUri('https://lagen.nu/prop/1997/98:44'), 'prop/1995-1999');
-  assert.equal(packIdForUri('https://lagen.nu/prop/2020/21:12'), 'prop/2020-2024');
-  assert.equal(packIdForUri('https://lagen.nu/sou/2021:1'), 'sou/2020s');
-  assert.equal(packIdForUri('https://lagen.nu/ds/2023:5'), 'ds/2020s');
+  assert.equal(packIdForUri('https://lagen.nu/prop/1997/98:44'), 'prop/1997-98');
+  assert.equal(packIdForUri('https://lagen.nu/prop/2020/21:12'), 'prop/2020-21');
+  assert.equal(packIdForUri('https://lagen.nu/sou/2021:1'), 'sou/2021');
+  assert.equal(packIdForUri('https://lagen.nu/ds/2023:5'), 'ds/2023');
 });
 
 test('generateDecoyPrefixes creates distinct random 3-hex buckets', () => {
@@ -175,3 +176,92 @@ test('getProvisionText and provisionText accurately slice markdown with anchor m
   assert.equal(scope.exact, true);
   assert.equal(scope.text, '**3 a §** Särskild regel...');
 });
+
+test('formatPinLabel formats statutory, court, and EU provision fragments cleanly', async () => {
+  const { formatPinLabel, formatDisplayTitle } = await import('../src/privacy-api.js');
+  assert.equal(formatPinLabel('P4'), '4 §');
+  assert.equal(formatPinLabel('P3a'), '3 a §');
+  assert.equal(formatPinLabel('K18P7'), '18 kap. 7 §');
+  assert.equal(formatPinLabel('K2P3a'), '2 kap. 3 a §');
+  assert.equal(formatPinLabel('sid100'), 's. 100');
+  assert.equal(formatPinLabel('recital-83'), 'skäl 83');
+  assert.equal(formatPinLabel('32.1'), 'art. 32.1');
+
+  assert.equal(formatDisplayTitle('https://lagen.nu/1915:218'), 'Avtalslagen');
+  assert.equal(formatDisplayTitle('https://lagen.nu/1942:740'), 'Rättegångsbalken');
+  assert.equal(formatDisplayTitle('https://lagen.nu/dom/nja/2013s502'), 'NJA 2013 s. 502');
+  assert.equal(formatDisplayTitle('https://lagen.nu/dom/hfd/2022:15'), 'HFD 2022 ref. 15');
+  assert.equal(formatDisplayTitle('https://lagen.nu/prop/1997/98:44'), 'Prop. 1997/98:44');
+});
+
+test('artifactToMarkdown converts AST to markdown with accurate anchor offsets', async () => {
+  const { artifactToMarkdown } = await import('../src/privacy-api.js');
+  const artifact = {
+    uri: 'https://lagen.nu/1998:204',
+    title: 'Personuppgiftslag (1998:204)',
+    structure: [
+      {
+        type: 'paragraf',
+        id: 'P1',
+        num: '1',
+        beteckning: '1 §',
+        text: 'Syftet med denna lag är att skydda fysiska personer mot att deras personliga integritet kränks.'
+      },
+      {
+        type: 'paragraf',
+        id: 'P2',
+        num: '2',
+        beteckning: '2 §',
+        text: 'Lagen gäller för sådan behandling av personuppgifter som är helt eller delvis automatiserad.'
+      }
+    ]
+  };
+
+  const { markdown, anchors, title } = artifactToMarkdown(artifact);
+  assert.equal(title, 'Personuppgiftslag (1998:204)');
+  assert.ok(markdown.includes('**1 §** Syftet med denna lag'));
+  assert.ok(markdown.includes('**2 §** Lagen gäller för'));
+  assert.ok(anchors.P1);
+  assert.ok(anchors.P2);
+
+  const p1Text = markdown.slice(anchors.P1[0], anchors.P1[1]).trim();
+  assert.ok(p1Text.startsWith('**1 §** Syftet med denna lag'));
+});
+
+test('OHTTP key parsing, BHTTP framing, and HPKE mutual cycle', async () => {
+  const {
+    parseOhttpKeys,
+    encodeBhttpRequest,
+    decodeBhttpResponse,
+    encapsulateRequest,
+    decapsulateResponse,
+  } = await import('../src/ohttp.js');
+
+  // Test RFC 9458 key framing (2 bytes total length, 2 bytes config length, 1 byte id, etc.)
+  const RFC_PUBLIC_KEY = '31e1f05a740102115220e9af918f738674aec95f54db6e04eb705aae8e798155';
+  const rawKeyBytes = new Uint8Array(Buffer.from(RFC_PUBLIC_KEY, 'hex'));
+  const keyConfigBytes = new Uint8Array(Buffer.from('0029010020' + RFC_PUBLIC_KEY + '000400010001', 'hex'));
+
+  const parsedKeys = parseOhttpKeys(keyConfigBytes);
+  assert.equal(parsedKeys.length, 1);
+  assert.equal(parsedKeys[0].keyId, 1);
+  assert.equal(parsedKeys[0].kemId, 0x0020);
+  assert.equal(parsedKeys[0].kdfId, 0x0001);
+  assert.equal(parsedKeys[0].aeadId, 0x0001);
+  assert.deepEqual(parsedKeys[0].publicKey, rawKeyBytes);
+
+  // Test BHTTP request encoding
+  const bhttp = encodeBhttpRequest('GET', '/api/v1/range/c4a', [['accept', 'text/plain']]);
+  assert.ok(bhttp.length > 0);
+
+  // Test Encapsulation
+  const encResult = await encapsulateRequest(bhttp, parsedKeys[0]);
+  assert.equal(encResult.enc.length, 32);
+  assert.ok(encResult.encapsulated.length > 39);
+
+  // Test BHTTP response decoding from synthetic response
+  const rawResponse = new Uint8Array(Buffer.from('0140c80000', 'hex')); // framing 1, status 200, empty section & content
+  const decoded = decodeBhttpResponse(rawResponse);
+  assert.equal(decoded.status, 200);
+});
+

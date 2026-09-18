@@ -1,11 +1,19 @@
-import * as pdfjs from 'pdfjs-dist';
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import mammoth from 'mammoth/mammoth.browser.js';
 import { pdfPageText, selectEvidence, validateBlocks } from './analysis.js';
 
-pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+let pdfjsModule;
+
+async function getPdfjs() {
+  if (!pdfjsModule) {
+    const pdfjs = await import('pdfjs-dist');
+    const { default: pdfWorkerUrl } = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
+    pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+    pdfjsModule = pdfjs;
+  }
+  return pdfjsModule;
+}
 
 async function readPdf(buffer) {
+  const pdfjs = await getPdfjs();
   const task = pdfjs.getDocument({ data: buffer, isEvalSupported: false, useSystemFonts: true });
   const pdf = await task.promise;
   try {
@@ -27,19 +35,23 @@ async function readPdf(buffer) {
   }
 }
 
+async function readDocx(buffer) {
+  const { default: mammoth } = await import('mammoth/mammoth.browser.js');
+  const converted = await mammoth.convertToHtml({ arrayBuffer: buffer }, {
+    externalFileAccess: false,
+    convertImage: mammoth.images.imgElement(() => Promise.resolve({ src: '' })),
+  });
+  return { html: converted.value, warnings: converted.messages.length ? ['Word-filen innehåller formatering som inte kunde läsas fullständigt. Kontrollera dokumenttexten i rapporten.'] : [] };
+}
+
 self.onmessage = async ({ data }) => {
   // This boundary returns a recoverable file/source error to the UI. It keeps
   // completed results available, and never turns a failure into invalidity.
   try {
     let result;
     if (data.type === 'pdf') result = await readPdf(data.buffer);
-    else if (data.type === 'docx') {
-      const converted = await mammoth.convertToHtml({ arrayBuffer: data.buffer }, {
-        externalFileAccess: false,
-        convertImage: mammoth.images.imgElement(() => Promise.resolve({ src: '' })),
-      });
-      result = { html: converted.value, warnings: converted.messages.length ? ['Word-filen innehåller formatering som inte kunde läsas fullständigt. Kontrollera dokumenttexten i rapporten.'] : [] };
-    } else if (data.type === 'evidence') result = selectEvidence(data.markdown, data.uri, data.claim, data.anchors);
+    else if (data.type === 'docx') result = await readDocx(data.buffer);
+    else if (data.type === 'evidence') result = selectEvidence(data.markdown, data.uri, data.claim, data.anchors);
     else throw new Error('Okänd dokumentåtgärd.');
     self.postMessage({ id: data.id, result });
   } catch (error) {

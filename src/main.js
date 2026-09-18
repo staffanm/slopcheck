@@ -1,5 +1,5 @@
 import './style.css';
-import { extract, getDocumentSource, pool, request, resolveTarget, resolveTargetPrivate, stopExtractionWorker } from './api.js';
+import { extract, getDocumentSource, pool, prefetchCorePack, request, resolveTarget, resolveTargetPrivate, stopExtractionWorker } from './api.js';
 import { citationSegments, claimContext, invalidCitationMessage, occurrenceStatus, validateBlocks } from './analysis.js';
 import { matchesFilter, MODEL_VERSION, rowSemantic, SEMANTIC, semanticClaim } from './semantic.js';
 import { semanticClient } from './semantic-client.js';
@@ -424,8 +424,11 @@ async function checkTarget(target, signal) {
   target.sourceError = undefined;
   target.revision++;
   updateReport();
+  const isLocal = Boolean($('#local-mode')?.checked);
   try {
-    const resolution = await resolveTarget(target.uri, signal);
+    const resolution = isLocal
+      ? await resolveTargetPrivate(target.uri, signal, { fallbackToResolve: false, sendDecoys: true })
+      : await resolveTarget(target.uri, signal);
     signal.throwIfAborted();
     Object.assign(target, resolution);
   } catch (error) {
@@ -438,12 +441,13 @@ async function checkTarget(target, signal) {
   if (target.status !== 'found') return;
   try {
     const uri = (target.result?.uri ?? target.uri).split('#')[0];
-    if (!sourceCache.has(uri)) sourceCache.set(uri, request(`document?${new URLSearchParams({ uri, format: 'md' })}`, { signal }));
+    if (!sourceCache.has(uri)) sourceCache.set(uri, getDocumentSource(uri, signal, { privacyMode: isLocal }));
     const source = await sourceCache.get(uri);
-    if (typeof source.markdown !== 'string') throw new Error('API:t returnerar ingen källtext.');
+    const markdown = source?.markdown ?? source?.text;
+    if (typeof markdown !== 'string') throw new Error('API:t returnerar ingen källtext.');
     for (const row of rows.filter(row => row.occurrence.targets.some(item => item.uri === target.uri))) {
       signal.throwIfAborted();
-      const evidence = await work('evidence', { markdown: source.markdown, anchors: source.anchors, uri: target.result.pin?.uri ?? target.uri, claim: row.claim });
+      const evidence = await work('evidence', { markdown, anchors: source.anchors, uri: target.result.pin?.uri ?? target.uri, claim: row.claim });
       signal.throwIfAborted();
       row.evidence.set(target.uri, evidence);
     }
@@ -524,6 +528,7 @@ if ($('#local-mode')) {
     if (localStorage.getItem('slopcheck:local_mode') === '1') {
       $('#local-mode').checked = true;
       updatePrivacyNote();
+      prefetchCorePack();
     }
   } catch {}
   $('#local-mode').addEventListener('change', () => {
@@ -531,6 +536,9 @@ if ($('#local-mode')) {
       localStorage.setItem('slopcheck:local_mode', $('#local-mode').checked ? '1' : '0');
     } catch {}
     updatePrivacyNote();
+    if ($('#local-mode').checked) {
+      prefetchCorePack();
+    }
   });
 }
 
