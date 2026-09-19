@@ -97,5 +97,20 @@ export async function pool(items, task, signal, concurrency = 4) {
   }));
 }
 
+export async function matchClaimRemote(claim, sources, { signal, baseUrl = '' } = {}) {
+  const url = `${baseUrl}/api/match`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ claim, sources }),
+    signal,
+  });
+  if (!response.ok) {
+    throw new Error(`Kunde inte bedöma påståendet (${response.status})`);
+  }
+  return response.json();
+}
+
 export * from './privacy-api.js';
+
 

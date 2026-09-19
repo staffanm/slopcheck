@@ -11,6 +11,7 @@
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --test test/*.test.js",
+    "test:backend": "uv run --extra-index-url https://download.pytorch.org/whl/cpu --with torch --with transformers --with fastapi --with httpx python3 backend/test_backend.py",
     "test:browser": "playwright test",
     "export:lagrum": "python scripts/export-lagrum.py",
     "model:prepare": "uv run --python 3.12 scripts/export-model.py",

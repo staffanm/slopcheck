@@ -1,7 +1,6 @@
-# slopcheck -- static SPA behind nginx. The app has no backend of its own:
-# the browser talks straight to https://lagen.nu/api/v1/ (CORS is open
-# there). Put a reverse proxy with TLS in front of port 8099, or change the
-# mapping to whatever the host's proxy expects.
+# slopcheck -- static SPA and backend NLI service.
+# Nginx proxies /api/ and /match to the backend service.
+# Host reverse proxy maps slopcheck.tomtebo.org to port 8099.
 services:
   slopcheck:
     build: .
@@ -10,3 +9,21 @@ services:
     restart: unless-stopped
     ports:
       - "8099:80"
+    depends_on:
+      - backend
+
+  backend:
+    build: ./backend
+    image: slopcheck-backend:latest
+    container_name: slopcheck-backend
+    restart: unless-stopped
+    environment:
+      - MODEL_NAME=MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7
+      - NUM_THREADS=2
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    ports:
+      - "127.0.0.1:8098:8000"
+
+volumes:
+  hf-cache:
