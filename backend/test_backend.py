@@ -127,5 +127,16 @@ class TestSemanticBackend(unittest.TestCase):
                 self.assertIn("reason", body)
                 self.assertIn("comparisons", body)
 
+            # Test long context passage (> 1000 tokens)
+            long_source = "Detta är ett viktigt avtalsvillkor och en central rättslig princip i svensk rätt. " * 120
+            resp = client.post("/api/match", json={
+                "claim": "Avtalsvillkor är viktiga.",
+                "sources": [long_source]
+            })
+            self.assertEqual(resp.status_code, 200)
+            body = resp.json()
+            self.assertIn(body["label"], ["correct", "unsupported", "abstain"])
+            self.assertEqual(len(body["comparisons"]), 1)
+
 if __name__ == "__main__":
     unittest.main()

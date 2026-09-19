@@ -139,8 +139,8 @@ def evaluate_semantic(
         status = "incorrect"
         reason = SEMANTIC_LABELS["incorrect"][1]
         evidence = conflict
-    elif all(c["scores"]["neutral"] >= t["neutral"] for c in comparisons) or \
-         (support["scores"]["entailment"] < 0.40 and conflict["scores"]["contradiction"] < 0.40):
+    elif (support["scores"]["entailment"] < t["conflict"] and conflict["scores"]["contradiction"] < t["conflict"]) or \
+         all(c["scores"]["neutral"] >= t["neutral"] for c in comparisons):
         label = "unsupported"
         status = "missing"
         reason = SEMANTIC_LABELS["unsupported"][1]

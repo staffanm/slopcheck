@@ -18,7 +18,7 @@ services:
     container_name: slopcheck-backend
     restart: unless-stopped
     environment:
-      - MODEL_NAME=MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7
+      - MODEL_NAME=BalaRajesh1/mmbert-small-nli
       - NUM_THREADS=2
     volumes:
       - hf-cache:/root/.cache/huggingface

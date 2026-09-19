@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/wh
 COPY . .
 
 ENV PORT=8000
-ENV MODEL_NAME=MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7
+ENV MODEL_NAME=BalaRajesh1/mmbert-small-nli
 ENV NUM_THREADS=2
 
 EXPOSE 8000
