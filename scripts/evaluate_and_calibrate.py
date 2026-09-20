@@ -412,10 +412,14 @@ def main():
 
     # Breakdown by source unit type
     print("\n--- Breakdown by Source Unit Type ---")
-    unit_types = sorted(list(set(r["source"].get("unit_type", "unknown") for r in test_rows)))
+    def get_row_unit_type(r):
+        sources = r.get("sources") or ([r["source"]] if "source" in r else [])
+        return sources[0].get("unit_type", "unknown") if sources else "unknown"
+
+    unit_types = sorted(list(set(get_row_unit_type(r) for r in test_rows)))
     type_results = {}
     for ut in unit_types:
-        indices = [i for i, r in enumerate(test_rows) if r["source"].get("unit_type") == ut]
+        indices = [i for i, r in enumerate(test_rows) if get_row_unit_type(r) == ut]
         if indices:
             u_preds = [test_preds[i] for i in indices]
             u_targets = [test_targets[i] for i in indices]

@@ -138,7 +138,7 @@ def verify_numerical_parity(model_dir: Path, onnx_path: Path, quant_path: Path):
 
 def benchmark_cpu(quant_path: Path, num_threads_list=(1, 3)):
     print("\n--- CPU Latency Benchmarking (ONNX INT8) ---")
-    tokenizer = AutoTokenizer.from_pretrained("BalaRajesh1/mmbert-small-nli")
+    tokenizer = AutoTokenizer.from_pretrained(str(quant_path.parent))
     test_lengths = [128, 512, 2048, 8192]
     benchmark_results = {}
 
