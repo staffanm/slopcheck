@@ -1,5 +1,5 @@
 import { sentenceSegments } from './analysis.js';
-import { rankPassagesBM25 } from './windowing.js';
+import { rankPassagesBM25, selectWindow } from './windowing.js';
 
 // Never truncate a premise or hypothesis: doing so can remove an exception or
 // negation. Retain the exact sentence text shown in the report.
@@ -34,6 +34,24 @@ export function modelPassages(passages, tokenizer, hypothesis = '') {
     return { passages: selected, incomplete: true };
   }
   return { passages: unique.slice(0, 10), incomplete: true };
+}
+
+// One premise window, built the way backend/windowing.py builds it. The model
+// reads the selected passages together, so a procedural line cannot contradict
+// a claim that the reasoning and the decision support.
+export function premiseWindow(passages, tokenizer, hypothesis) {
+  const selected = selectWindow(passages, hypothesis, 350, tokenizer);
+  if (!selected.length) return null;
+  const shared = key => {
+    const values = new Set(selected.map(passage => passage[key]).filter(Boolean));
+    return values.size === 1 ? [...values][0] : undefined;
+  };
+  return {
+    text: selected.map(passage => passage.text).join('\n\n'),
+    court: shared('court'),
+    section: shared('section'),
+    roles: [...new Set(selected.map(passage => passage.role).filter(Boolean))],
+  };
 }
 
 export function pairInput(tokenizer, premise, hypothesis) {

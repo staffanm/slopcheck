@@ -4,7 +4,7 @@ import wasmUrl from 'onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm?url';
 import wasmModuleUrl from 'onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs?url';
 import manifest from './model-manifest.json';
 import { MODEL_VERSION, scoresFromLogits, semanticResult } from './semantic.js';
-import { modelPassages, pairInput } from './semantic-input.js';
+import { modelPassages, pairInput, premiseWindow } from './semantic-input.js';
 import { sha256Hex } from './sha256.js';
 
 env.wasm.numThreads = 1; // Works on static hosts without cross-origin isolation.
@@ -77,11 +77,17 @@ self.onmessage = async ({ data: { id, base, claim, evidence } }) => {
   try {
     await start(base, id);
     const selected = modelPassages(evidence.passages, tokenizer, claim?.hypothesis);
+    // The premise shape must match the weights. The shipped model scores one
+    // passage at a time. A model trained on merged windows reads one window,
+    // the way backend/model.py reads it. See docs/semantic-evaluation.md.
+    const premises = manifest.premise === 'window'
+      ? [premiseWindow(selected.passages, tokenizer, claim.hypothesis)].filter(Boolean)
+      : selected.passages.map(({ text, court, section, role }) => ({ text, court, section, role }));
     const comparisons = [];
-    for (const passage of selected.passages) {
-      const encoded = pairInput(tokenizer, passage.text, claim.hypothesis);
+    for (const premise of premises) {
+      const encoded = pairInput(tokenizer, premise.text, claim.hypothesis);
       if (!encoded) { selected.incomplete = true; continue; }
-      comparisons.push({ text: passage.text, court: passage.court, section: passage.section, role: passage.role, scores: await compare(encoded) });
+      comparisons.push({ ...premise, scores: await compare(encoded) });
     }
     self.postMessage({ id, result: { ...semanticResult(comparisons, { ...selected, requireConclusion: evidence.requireConclusion, reason: evidence.reason, exact: evidence.exact }), backend, model: MODEL_VERSION } });
   } catch (error) {

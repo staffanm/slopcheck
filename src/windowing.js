@@ -66,3 +66,40 @@ export function rankPassagesBM25(passages, query) {
   const bm25 = new BM25(passages.map(p => p.text || ''));
   return bm25.score(query);
 }
+
+/**
+ * Counts premise tokens with the model tokenizer, or estimates them without one.
+ * The estimate matches estimate_tokens in backend/windowing.py.
+ */
+function tokenCount(text, tokenizer) {
+  if (tokenizer) return tokenizer.encode(text, { add_special_tokens: false }).ids.length;
+  return Math.floor((text.match(/\S+/g) || []).length * 1.35) + 5;
+}
+
+/**
+ * Selects the passages of one premise window of at most maxTokens tokens.
+ * Ranks the passages by BM25 against the query, then returns the selected
+ * passages in document order. Mirrors window_premise in backend/windowing.py.
+ */
+export function selectWindow(passages, query, maxTokens = 350, tokenizer = null) {
+  if (!passages?.length) return [];
+  const joined = passages.map(passage => passage.text).join('\n\n');
+  if (tokenCount(joined, tokenizer) <= maxTokens) return [...passages];
+
+  const scores = rankPassagesBM25(passages, query);
+  const ranked = passages.map((passage, index) => ({ passage, score: scores[index], index }));
+  ranked.sort((a, b) => b.score - a.score || a.index - b.index);
+
+  const selected = [];
+  let total = 0;
+  for (const item of ranked) {
+    const tokens = tokenCount(item.passage.text, tokenizer);
+    if (total + tokens <= maxTokens || !selected.length) {
+      selected.push(item);
+      total += tokens;
+    }
+    if (total >= maxTokens) break;
+  }
+  selected.sort((a, b) => a.index - b.index);
+  return selected.map(item => item.passage);
+}

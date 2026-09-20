@@ -4,7 +4,7 @@ import { Tokenizer } from '@huggingface/tokenizers';
 import { readFileSync } from 'node:fs';
 import { claimContext } from '../src/analysis.js';
 import { MODEL_VERSION, semanticClaim, semanticResult, scoresFromLogits, rowSemantic, matchesFilter } from '../src/semantic.js';
-import { modelPassages, pairInput } from '../src/semantic-input.js';
+import { modelPassages, pairInput, premiseWindow } from '../src/semantic-input.js';
 
 const tokenizer = new Tokenizer(...['tokenizer.json', 'tokenizer_config.json'].map(name => JSON.parse(readFileSync(new URL(`../public/models/${MODEL_VERSION}/${name}`, import.meta.url)))));
 const scores = (entailment, neutral, contradiction) => ({ entailment, neutral, contradiction });
@@ -86,6 +86,23 @@ test('tokenized pairs use premise first and never truncate either input', () => 
   const ranked = modelPassages(dummyPassages, tokenizer, 'Krävs skadeståndsansvar vid force majeure?');
   assert.equal(ranked.passages.length, 10);
   assert.ok(ranked.passages.some(p => p.text.includes('force majeure')));
+});
+
+test('a merged premise window keeps shared metadata and every included role', () => {
+  const passages = [
+    { text: 'Åtal väcktes för försök till grov misshandel.', court: 'högsta domstolen', section: 'Skäl', role: 'reasoning' },
+    { text: 'HD dömer för framkallande av fara för annan.', court: 'högsta domstolen', section: 'Domslut', role: 'decision' },
+  ];
+  const window = premiseWindow(passages, tokenizer, 'Mannen dömdes för framkallande av fara för annan.');
+  assert.equal(window.text, passages.map(passage => passage.text).join('\n\n'));
+  assert.equal(window.court, 'högsta domstolen');
+  assert.equal(window.section, undefined); // Two sections cannot label one window.
+  assert.deepEqual(window.roles, ['reasoning', 'decision']);
+  assert.equal(premiseWindow([], tokenizer, 'Ett påstående.'), null);
+  // A window satisfies the attributed court's conclusion rule through its roles.
+  const yes = { scores: scores(.99, .005, .005) };
+  assert.equal(semanticResult([{ ...yes, roles: ['reasoning'] }], { requireConclusion: true }).status, 'abstain');
+  assert.equal(semanticResult([{ ...yes, roles: window.roles }], { requireConclusion: true }).status, 'correct');
 });
 
 test('multiple targets and semantic filters do not change source validity', () => {

@@ -83,7 +83,7 @@ def main():
     onnx.save(graph, output / "model.onnx")
     files = {name: {"bytes": (output / name).stat().st_size, "sha256": hashlib.sha256((output / name).read_bytes()).hexdigest()}
              for name in ["model.onnx", "tokenizer.json", "tokenizer_config.json", "config.json"]}
-    manifest = {"model": args.model_dir, "revision": REVISION, "version": VERSION, "license": "Apache-2.0", "quantization": "symmetric int8 weights, float32 activations", "files": files}
+    manifest = {"model": args.model_dir, "revision": REVISION, "version": VERSION, "license": "Apache-2.0", "quantization": "symmetric int8 weights, float32 activations", "premise": "passage", "files": files}
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(json.dumps(manifest, indent=2))
 

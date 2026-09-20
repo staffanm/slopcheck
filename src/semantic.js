@@ -144,7 +144,7 @@ export function semanticResult(comparisons, { incomplete = false, requireConclus
   else if ((strongSupport && conflict.scores.contradiction >= THRESHOLDS.conflict) || (strongConflict && support.scores.entailment >= THRESHOLDS.conflict)) {
     reason = 'Källavsnitten ger motstridiga signaler. Det går inte att avgöra om ett villkor saknas eller om modellen misstolkar texten.';
   } else if (strongSupport) {
-    const conclusion = comparisons.find(item => ['summary', 'decision'].includes(item.role) && item.scores.entailment >= THRESHOLDS.supported);
+    const conclusion = comparisons.find(item => (item.roles ?? [item.role]).some(role => ['summary', 'decision'].includes(role)) && item.scores.entailment >= THRESHOLDS.supported);
     if (requireConclusion && !conclusion) reason = 'Modellen hittar liknande text, men kan inte bekräfta påståendet i domstolens sammanfattning eller avgörande.';
     else { status = 'correct'; evidence = conclusion ?? support; }
   }

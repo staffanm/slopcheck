@@ -114,7 +114,7 @@ all correct. The abstentions had four causes. Each got a fix the same day:
 ### Browser results, 16 September 2026, after the changes
 
 [Recorded outputs](legal-claim-results.json) come from Chromium with WASM on this host.
-The 64 assessable claims took 15.5 seconds after the model had loaded.
+The 66 assessable claims took 15.5 seconds after the model had loaded.
 
 | Kind | Claims | Supported | Contradiction | Missing | Abstain | Unassessable |
 |---|---:|---:|---:|---:|---:|---:|
@@ -150,6 +150,58 @@ right side to err on. The two originally reported claims still abstain: the guar
 0.36 support, the lower-court claim at 0.69.
 These results do not establish reliable legal reasoning. They show that the label policy
 holds on 64 realistic claims, and that the deterministic layer no longer hides the model.
+
+## One merged premise window, measured and rejected for these weights
+
+The server sends one premise to the model. `backend/model.py` calls `window_premise`,
+which ranks the source paragraphs by BM25 against the claim and joins the best ones
+into a single text of at most 380 tokens. The browser instead scored each selected
+passage on its own. `src/windowing.js` now mirrors the server's ranking, so the browser
+can build the same window. The browser worker was changed to do so and measured against
+the 70-claim fixture, on the same host, with the same shipped weights.
+
+| Premise shape | Inferences | Total time | Per claim | Supported | Contradiction | Missing | Wrong labels |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| one passage per inference | 232 | 11.6 s | 176 ms | 7 | 1 | 3 | 0 |
+| one merged window | 66 | 7.8 s | 118 ms | 4 | 0 | 0 | 0 |
+
+The window is faster and gives no wrong label. It also removes seven of the eleven
+substantive labels and adds none. The cause is dilution. A longer premise moves every
+probability toward neutral:
+
+| Claim | Kind | Per passage | Merged window |
+|---|---|---|---|
+| ett sent svar gäller som nytt anbud (4 § AvtL) | correct | 0.97 entailment | 0.93 |
+| straffskalan för mord (3 kap. 1 § BrB) | correct | 0.98 entailment | 0.96 |
+| reklamation inom två år (32 § KöpL) | correct | 0.97 entailment | 0.96 |
+| treårsregeln omfattar löpande skuldebrev (2 § PreskL) | incorrect | 0.98 contradiction | 0.26 |
+
+The 0.97 thresholds were calibrated on single passages, so a lower threshold could suit
+the window better. It does not. The recorded scores of both runs were relabelled at every
+threshold from 0.99 to 0.80. The figures below are substantive labels over wrong labels:
+
+| Premise shape | 0.99 | 0.97 | 0.95 | 0.93 | 0.90 | 0.85 | 0.80 |
+|---|---|---|---|---|---|---|---|
+| one passage per inference | 3/0 | 11/0 | 14/0 | 15/0 | 18/0 | 25/3 | 28/5 |
+| one merged window | 0/0 | 4/0 | 6/0 | 6/0 | 7/0 | 8/1 | 12/3 |
+
+The passage shape gives more substantive labels at every threshold and reaches a wrong
+label later. The window is worse at every operating point, so the browser keeps one
+inference per passage.
+
+The window still does what it was proposed for. For `hiv-endangerment`, a correct claim
+about NJA 2004 s. 176, an isolated procedural line reads as a contradiction. The passage
+shape scores 0.92 contradiction on that line. The merged window, which also holds HD's
+reasoning and decision, scores 0.11. The shipped weights stay under the 0.97 threshold
+either way, so the claim abstains and no reader is misled. Weights fine-tuned on windowed
+premises score higher and would cross it. Such weights must read the window.
+
+The premise shape belongs to the weights, not to the client. `scripts/train_kb_bert.py`
+and `scripts/train_scandi_nli.py` both train on `window_premise` output. The shipped
+ScandiNLI weights were trained on single sentence pairs. `src/model-manifest.json`
+therefore records `"premise": "passage"`, and the worker reads it. A model exported from
+the windowed training scripts records `"premise": "window"` and gets one merged premise.
+Do not change the premise shape without re-running this fixture on the new weights.
 
 ## Reproduce
 

@@ -4,6 +4,7 @@
   "version": "scandi-nli-small-5c7d1ee-q8-v1",
   "license": "Apache-2.0",
   "quantization": "symmetric int8 weights, float32 activations",
+  "premise": "passage",
   "files": {
     "model.onnx": {
       "bytes": 22323359,

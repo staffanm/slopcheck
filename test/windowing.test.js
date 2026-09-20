@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { BM25, rankPassagesBM25, tokenizeWords } from '../src/windowing.js';
+import { BM25, rankPassagesBM25, selectWindow, tokenizeWords } from '../src/windowing.js';
 
 test('tokenizeWords normalizes case and handles Swedish characters', () => {
   const words = tokenizeWords('Ett skadeståndsansvar enligt 2 kap. 1 § SkL!');
@@ -28,4 +28,21 @@ test('rankPassagesBM25 scores passages accurately', () => {
   const scores = rankPassagesBM25(passages, 'återkallelse av anbud');
   assert.equal(scores.length, 2);
   assert.ok(scores[1] > scores[0]);
+});
+
+test('selectWindow keeps every passage that fits and ranks the rest by BM25', () => {
+  const passages = [
+    { text: 'Allmän inledning om avtal och fullmakt.' },
+    { text: 'En proprieborgensman ansvarar för skulden som för sin egen skuld.' },
+    { text: 'Vidare kan borgenären kräva betalning direkt vid förfallodagen.' },
+    { text: 'Avslutande bestämmelser om arkivering och ikraftträdande.' },
+  ];
+  const query = 'Krävs betalning direkt från proprieborgensman för egen skuld?';
+  assert.deepEqual(selectWindow(passages, query, 500), passages);
+  const window = selectWindow(passages, query, 30);
+  assert.ok(window.length < passages.length);
+  assert.ok(window.some(passage => passage.text.includes('proprieborgensman')));
+  // The window keeps document order, whatever the BM25 order was.
+  assert.deepEqual(window, passages.filter(passage => window.includes(passage)));
+  assert.deepEqual(selectWindow([], query, 30), []);
 });
