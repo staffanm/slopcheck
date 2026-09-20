@@ -1,0 +1,49 @@
+{
+  "total_rows": 7492,
+  "partitions": {
+    "train": 5615,
+    "validation": 749,
+    "calibration": 563,
+    "test": 565
+  },
+  "labels": {
+    "supported": 3908,
+    "unsupported": 1233,
+    "incorrect": 1179,
+    "misleading": 1172
+  },
+  "source_counts": {
+    "1": 5067,
+    "2": 1920,
+    "3": 411,
+    "4": 77,
+    "5": 11,
+    "6": 5,
+    "7": 1
+  },
+  "transformations": {
+    "authentic": 1241,
+    "paraphrase": 1238,
+    "distractor_source": 1222,
+    "topic_match": 555,
+    "contradiction": 1179,
+    "overstatement": 1172,
+    "adjacent": 678,
+    "reordered_sources": 207
+  },
+  "unit_types": {
+    "cjeu_assessment": 1971,
+    "statute_provision": 448,
+    "case_judgment": 2871,
+    "case_pinpoint": 1057,
+    "prop_page": 3882,
+    "statute_stycke": 100,
+    "cjeu_pinpoint": 211
+  },
+  "token_buckets": {
+    "<=512": 1394,
+    "513-2048": 4178,
+    "2049-4096": 1176,
+    "4097-8192": 744
+  }
+}

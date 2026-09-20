@@ -8,3 +8,7 @@ __pycache__/
 
 # Real-world court documents with PII (kept local only)
 Eskilstuna TR T 667-25*.pdf
+
+# Local artifact cache & model checkpoints
+backend/.artifact_cache/
+models/

@@ -220,3 +220,13 @@ The plan is a slopcheck-specific inference service, not a lagen.nu API:
    This ships before the service, in the browser, and applies to both models.
 
 Not in the plan: exposing the service under lagen.nu, GPU hosting, or a generative model as judge.
+
+## Dataset Viewer & Review UI
+
+To inspect, filter, and review the Swedish legal claim-evidence dataset (7,492 partitioned rows) on your desktop or mobile phone:
+
+```sh
+python3 scripts/serve_dataset_viewer.py --host 0.0.0.0 --port 8088
+```
+
+See [the Dataset Viewer documentation](docs/dataset-viewer.md) for details on multi-source evidence cards, side-by-side claim comparison, lagen.nu navigation, and stratified sample reviews.
