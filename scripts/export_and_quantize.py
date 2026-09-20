@@ -67,13 +67,13 @@ def export_to_onnx(model_dir: Path, onnx_path: Path):
 
 
 def quantize_to_int8(onnx_path: Path, quant_path: Path):
-    print(f"Quantizing {onnx_path} to INT8 dynamic at {quant_path}...")
+    print(f"Quantizing {onnx_path} to INT8 dynamic (QUInt8) at {quant_path}...")
+    # QuantType.QUInt8 ensures cross-architecture compatibility without AVX2 integer
+    # overflow/saturation on CPUs lacking AVX-512 VNNI (e.g., Broadwell/Haswell/vCPUs).
     quantize_dynamic(
         model_input=str(onnx_path),
         model_output=str(quant_path),
-        weight_type=QuantType.QInt8,
-        per_channel=True,
-        reduce_range=False
+        weight_type=QuantType.QUInt8
     )
     size_mb = quant_path.stat().st_size / (1024 * 1024)
     print(f"INT8 Quantization complete! Size: {size_mb:.1f} MB")
