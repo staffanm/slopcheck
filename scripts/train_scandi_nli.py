@@ -28,8 +28,27 @@ LABEL2ID_3WAY = {
 ID2LABEL_3WAY = {0: "entailment", 1: "neutral", 2: "contradiction"}
 
 
+ATTRIBUTION_AUGMENTATIONS = [
+    ("Käranden anförde att avtalet var ogiltigt. Tingsrätten ansåg däremot att avtalet var giltigt.", "Tingsrätten ansåg att avtalet var ogiltigt.", 2),
+    ("Svaranden hävdade att skulden var betald. Domstolen fann att skulden inte var betald.", "Domstolen fann att skulden var betald.", 2),
+    ("Svaranden invände att fordran var preskriberad. Hovrätten fann att preskription inte inträtt.", "Hovrätten fann att fordran var preskriberad.", 2),
+    ("Åklagaren påstod att den tilltalade handlat med uppsåt. Tingsrätten fann att uppsåt inte styrkts.", "Tingsrätten fann att den tilltalade handlat med uppsåt.", 2),
+    ("Käranden gjorde gällande att skada uppstått. Domstolen ogillade käromålet på den grunden att skada inte visats.", "Domstolen fann att skada uppstått.", 2),
+    ("Parten anförde att ett muntligt avtal träffats. Tingsrätten bedömde att något avtal inte ingåtts.", "Tingsrätten bedömde att ett muntligt avtal träffats.", 2),
+    ("Svaranden uppgav att betalning skett kontant. Hovrätten konstaterade att påståendet var motbevisat.", "Hovrätten fann att betalning skett kontant.", 2),
+    ("Käranden hävdade att uppsägningen var ogiltig. Arbetsdomstolen fann att uppsägningen var sakligt grundad.", "Arbetsdomstolen fann att uppsägningen var ogiltig.", 2),
+    ("Köparen påstod att varan var felaktig. Rätten fann att varan stämde överens med avtalet.", "Rätten fann att varan var felaktig.", 2),
+    ("Den part som förlorar målet ska ersätta motpartens rättegångskostnader.", "Den förlorande parten ska betala motpartens kostnader för rättegången.", 0),
+    ("Antagande svar som kommer för sent ska gälla som ett nytt anbud.", "Ett svar som kommer för sent ska räknas som ett nytt anbud.", 0),
+    ("Ett överklagande ska ha kommit in till tingsrätten inom tre veckor från den dag då domen meddelades.", "Överklagandet måste komma till tingsrätten senast tre veckor efter domen.", 0),
+    ("Avtalet måste vara skriftligt och undertecknat av båda parterna.", "Båda parterna måste skriva under det skriftliga avtalet.", 0),
+    ("Domstolen nämnde reglerna om preskription men prövade endast frågan om rättegångskostnader.", "Preskriptionstiden för fordringen är tio år.", 1),
+    ("I domen hänvisas till skadeståndslagen. Målet gällde dock endast frågan om domstolens behörighet.", "Skadeståndet ska motsvara tio procent av köpeskillingen.", 1),
+]
+
+
 class Windowed3WayDataset(Dataset):
-    def __init__(self, data_path: Path | str, tokenizer: Any, max_premise_tokens: int = 380):
+    def __init__(self, data_path: Path | str, tokenizer: Any, max_premise_tokens: int = 380, is_train: bool = False):
         self.examples = []
         with open(data_path, "r", encoding="utf-8") as f:
             for line in f:
@@ -46,6 +65,17 @@ class Windowed3WayDataset(Dataset):
                     "label": LABEL2ID_3WAY[row["label"]],
                     "id": row.get("id", "")
                 })
+
+        if is_train:
+            # Augment with hard attribution negatives and paraphrase positives (20x each)
+            for premise, hypothesis, label in ATTRIBUTION_AUGMENTATIONS:
+                for rep in range(20):
+                    self.examples.append({
+                        "premise": premise,
+                        "hypothesis": hypothesis,
+                        "label": label,
+                        "id": f"aug_{label}_{rep}"
+                    })
 
     def __len__(self):
         return len(self.examples)
@@ -163,8 +193,8 @@ def main():
     model.to(device)
 
     print("Preparing 3-way datasets with BM25 paragraph windowing...")
-    train_dataset = Windowed3WayDataset(args.train_data, tokenizer=tokenizer, max_premise_tokens=380)
-    val_dataset = Windowed3WayDataset(args.val_data, tokenizer=tokenizer, max_premise_tokens=380)
+    train_dataset = Windowed3WayDataset(args.train_data, tokenizer=tokenizer, max_premise_tokens=380, is_train=True)
+    val_dataset = Windowed3WayDataset(args.val_data, tokenizer=tokenizer, max_premise_tokens=380, is_train=False)
 
     train_loader = DataLoader(
         train_dataset,
@@ -181,13 +211,19 @@ def main():
         num_workers=0
     )
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01)
+    classifier_params = [p for n, p in model.named_parameters() if "classifier" in n and p.requires_grad]
+    backbone_params = [p for n, p in model.named_parameters() if "classifier" not in n and p.requires_grad]
+    optimizer = torch.optim.AdamW([
+        {"params": backbone_params, "lr": args.lr},
+        {"params": classifier_params, "lr": args.lr * 3.0}
+    ], weight_decay=0.01)
+
     total_steps = (len(train_loader) // args.grad_accum) * args.epochs
     warmup_steps = int(total_steps * 0.06)
     scheduler = get_linear_schedule_with_warmup(optimizer, warmup_steps, total_steps)
 
-    # Class balance weights: supported ~2900, unsupported ~920, contradiction ~1760
-    class_weights = torch.tensor([1.0, 2.5, 1.5], device=device, dtype=torch.float32)
+    # Balanced class weights (avoid suppressing entailment)
+    class_weights = torch.tensor([1.0, 1.1, 1.0], device=device, dtype=torch.float32)
     loss_fct = torch.nn.CrossEntropyLoss(weight=class_weights)
 
     best_macro_f1 = 0.0
