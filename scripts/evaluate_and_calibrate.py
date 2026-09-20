@@ -28,10 +28,11 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from backend.resolver import format_premise
 from backend.semantic import check_assessable
+from backend.windowing import window_premise
 
-def get_premise(row: dict) -> str:
+def get_premise(row: dict, tokenizer: Any = None) -> str:
     sources = row.get("sources") or ([row["source"]] if "source" in row else [])
-    return format_premise(sources)
+    return window_premise(row["claim"], sources, max_premise_tokens=380, tokenizer=tokenizer)
 
 LABEL2ID = {
     "supported": 0,
@@ -202,15 +203,18 @@ class EvaluatorAndCalibrator:
                 hypotheses,
                 padding=True,
                 truncation=True,
-                max_length=8192,
+                max_length=512,
                 return_tensors="pt"
             )
             input_ids = encodings["input_ids"].to(self.device)
             attention_mask = encodings["attention_mask"].to(self.device)
+            token_type_ids = encodings.get("token_type_ids")
+            if token_type_ids is not None:
+                token_type_ids = token_type_ids.to(self.device)
 
             with torch.no_grad():
                 with torch.amp.autocast(device_type=self.device.type, dtype=torch.bfloat16 if self.device.type == "cuda" else torch.float32):
-                    outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
+                    outputs = self.model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)
                     logits = outputs.logits.float().cpu().numpy()
             all_logits.append(logits)
 
@@ -327,7 +331,7 @@ def main():
     print("=======================================================")
     cal_rows = load_jsonl(args.cal_data)
     print(f"Loaded {len(cal_rows)} calibration rows.")
-    cal_pairs = [(get_premise(r), r["claim"]) for r in cal_rows]
+    cal_pairs = [(get_premise(r, evaluator.tokenizer), r["claim"]) for r in cal_rows]
     cal_targets = np.array([LABEL2ID[r["label"]] for r in cal_rows])
 
     raw_cal_logits = evaluator.predict_logits(cal_pairs)
@@ -376,7 +380,7 @@ def main():
     print("=======================================================")
     test_rows = load_jsonl(args.test_data)
     print(f"Loaded {len(test_rows)} test rows.")
-    test_pairs = [(get_premise(r), r["claim"]) for r in test_rows]
+    test_pairs = [(get_premise(r, evaluator.tokenizer), r["claim"]) for r in test_rows]
     test_targets = [LABEL2ID[r["label"]] for r in test_rows]
 
     raw_test_logits = evaluator.predict_logits(test_pairs)
@@ -508,11 +512,18 @@ def main():
 
         # Isolate deciding court if judgment
         source_unit_text = extract_deciding_court_from_fixture_markdown(source_content)
+        # BM25 paragraph windowing
+        windowed_source_text = window_premise(
+            claim_text,
+            [{"citation": item.get("file", ""), "text": source_unit_text}],
+            max_premise_tokens=380,
+            tokenizer=evaluator.tokenizer
+        )
 
         # Step C: Model inference
-        pair_enc = evaluator.tokenizer(source_unit_text, claim_text, truncation=False)
+        pair_enc = evaluator.tokenizer(windowed_source_text, claim_text, truncation=False)
         t_len = len(pair_enc["input_ids"])
-        if t_len > 8192:
+        if t_len > 512:
             harness_abstain += 1
             abstain_reasons["unit_too_long"] = abstain_reasons.get("unit_too_long", 0) + 1
             fixture_eval_rows.append({
@@ -526,7 +537,7 @@ def main():
             continue
 
         # Inference
-        logits = evaluator.predict_logits([(source_unit_text, claim_text)])[0] / opt_temp
+        logits = evaluator.predict_logits([(windowed_source_text, claim_text)])[0] / opt_temp
         probs = np.exp(logits - np.max(logits))
         probs /= np.sum(probs)
 

@@ -37,21 +37,26 @@ def export_to_onnx(model_dir: Path, onnx_path: Path):
         return_tensors="pt"
     )
     input_names = ["input_ids", "attention_mask"]
-    dummy_args = (dummy_input["input_ids"], dummy_input["attention_mask"])
+    dummy_args = [dummy_input["input_ids"], dummy_input["attention_mask"]]
+    dynamic_axes = {
+        "input_ids": {0: "batch", 1: "sequence"},
+        "attention_mask": {0: "batch", 1: "sequence"},
+        "logits": {0: "batch"}
+    }
+    if "token_type_ids" in dummy_input:
+        input_names.append("token_type_ids")
+        dummy_args.append(dummy_input["token_type_ids"])
+        dynamic_axes["token_type_ids"] = {0: "batch", 1: "sequence"}
 
     print(f"Exporting to ONNX at {onnx_path} (opset 17, dynamic sequence & batch)...")
     torch.onnx.export(
         model,
-        dummy_args,
+        tuple(dummy_args),
         str(onnx_path),
         input_names=input_names,
         output_names=["logits"],
         opset_version=17,
-        dynamic_axes={
-            "input_ids": {0: "batch", 1: "sequence"},
-            "attention_mask": {0: "batch", 1: "sequence"},
-            "logits": {0: "batch"}
-        },
+        dynamic_axes=dynamic_axes,
         dynamo=False
     )
     print("Checking exported ONNX model...")
@@ -87,7 +92,8 @@ def verify_numerical_parity(model_dir: Path, onnx_path: Path, quant_path: Path):
     sess_onnx = ort.InferenceSession(str(onnx_path), sess_options, providers=["CPUExecutionProvider"])
     sess_quant = ort.InferenceSession(str(quant_path), sess_options, providers=["CPUExecutionProvider"])
 
-    test_lengths = [128, 512, 2048, 8192]
+    max_pos = getattr(model.config, "max_position_embeddings", 512)
+    test_lengths = [64, 128, 256, 512] if max_pos <= 512 else [128, 512, 2048, 8192]
     parity_report = {}
 
     for length in test_lengths:
@@ -102,14 +108,20 @@ def verify_numerical_parity(model_dir: Path, onnx_path: Path, quant_path: Path):
         actual_len = input_ids.shape[1]
 
         # PyTorch reference
+        model_kwargs = {"input_ids": input_ids, "attention_mask": attention_mask}
+        if "token_type_ids" in enc:
+            model_kwargs["token_type_ids"] = enc["token_type_ids"]
         with torch.no_grad():
-            pt_out = model(input_ids=input_ids, attention_mask=attention_mask).logits.numpy()
+            pt_out = model(**model_kwargs).logits.numpy()
 
         # ONNX FP32
         ort_inputs = {
             "input_ids": input_ids.numpy().astype(np.int64),
             "attention_mask": attention_mask.numpy().astype(np.int64)
         }
+        if "token_type_ids" in enc:
+            ort_inputs["token_type_ids"] = enc["token_type_ids"].numpy().astype(np.int64)
+
         onnx_out = sess_onnx.run(None, ort_inputs)[0]
 
         # ONNX INT8
@@ -138,8 +150,11 @@ def verify_numerical_parity(model_dir: Path, onnx_path: Path, quant_path: Path):
 
 def benchmark_cpu(quant_path: Path, num_threads_list=(1, 3)):
     print("\n--- CPU Latency Benchmarking (ONNX INT8) ---")
+    from transformers import AutoConfig
     tokenizer = AutoTokenizer.from_pretrained(str(quant_path.parent))
-    test_lengths = [128, 512, 2048, 8192]
+    config = AutoConfig.from_pretrained(str(quant_path.parent))
+    max_len = getattr(config, "max_position_embeddings", 512)
+    test_lengths = [64, 128, 256, 512] if max_len <= 512 else [128, 512, 2048, 8192]
     benchmark_results = {}
 
     for threads in num_threads_list:
@@ -158,12 +173,14 @@ def benchmark_cpu(quant_path: Path, num_threads_list=(1, 3)):
                 "input_ids": enc["input_ids"].astype(np.int64),
                 "attention_mask": enc["attention_mask"].astype(np.int64)
             }
+            if "token_type_ids" in enc:
+                ort_inputs["token_type_ids"] = enc["token_type_ids"].astype(np.int64)
 
             # Warmup
             sess.run(None, ort_inputs)
 
             # Measure runs
-            runs = 5 if length <= 2048 else 3
+            runs = 5
             latencies = []
             for _ in range(runs):
                 t0 = time.perf_counter()
