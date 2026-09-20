@@ -76,7 +76,7 @@ async function compare(encoded) {
 self.onmessage = async ({ data: { id, base, claim, evidence } }) => {
   try {
     await start(base, id);
-    const selected = modelPassages(evidence.passages, tokenizer);
+    const selected = modelPassages(evidence.passages, tokenizer, claim?.hypothesis);
     const comparisons = [];
     for (const passage of selected.passages) {
       const encoded = pairInput(tokenizer, passage.text, claim.hypothesis);

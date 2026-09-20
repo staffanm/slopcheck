@@ -79,6 +79,13 @@ test('tokenized pairs use premise first and never truncate either input', () => 
   assert.ok(selected.passages.every(p => text.includes(p.text)));
   assert.equal(selected.incomplete, false);
   assert.equal(modelPassages([{ text: 'avtal '.repeat(600) }], tokenizer).incomplete, true);
+  // When >10 passages exist, BM25 ranks by relevance to hypothesis
+  const dummyPassages = Array.from({ length: 15 }, (_, i) => ({
+    text: i === 12 ? 'Särskild klausul om force majeure och skadeståndsansvar.' : `Allmän utfyllande text om avtalsvillkor stycke ${i}.`
+  }));
+  const ranked = modelPassages(dummyPassages, tokenizer, 'Krävs skadeståndsansvar vid force majeure?');
+  assert.equal(ranked.passages.length, 10);
+  assert.ok(ranked.passages.some(p => p.text.includes('force majeure')));
 });
 
 test('multiple targets and semantic filters do not change source validity', () => {
