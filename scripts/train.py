@@ -20,6 +20,8 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
 
+from backend.resolver import format_premise
+
 LABEL2ID = {
     "supported": 0,
     "unsupported": 1,
@@ -43,8 +45,10 @@ class LegalClaimDataset(Dataset):
 
     def __getitem__(self, idx):
         row = self.rows[idx]
+        sources = row.get("sources") or ([row["source"]] if "source" in row else [])
+        premise = format_premise(sources)
         return {
-            "premise": row["source"]["text"],
+            "premise": premise,
             "hypothesis": row["claim"],
             "label": LABEL2ID[row["label"]],
             "token_length": row.get("token_length", 0),
@@ -61,15 +65,15 @@ class BucketedBatchSampler:
         self.batch_size = batch_size
         self.shuffle = shuffle
 
-        # Group indices by length bucket
+        # Group indices by length bucket directly from dataset.rows
         buckets = {
             "<=512": [],
             "513-2048": [],
             "2049-4096": [],
             "4097-8192": []
         }
-        for idx in range(len(dataset)):
-            t_len = dataset[idx]["token_length"]
+        for idx, row in enumerate(dataset.rows):
+            t_len = row.get("token_length", 0)
             if t_len <= 512:
                 buckets["<=512"].append(idx)
             elif t_len <= 2048:
@@ -224,7 +228,7 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
 
     print(f"Loading pretrained 3-way weights from {args.model_name}...")
-    orig_model = AutoModelForSequenceClassification.from_pretrained(args.model_name, torch_dtype=torch.bfloat16)
+    orig_model = AutoModelForSequenceClassification.from_pretrained(args.model_name, dtype=torch.bfloat16)
     orig_w = orig_model.classifier.weight.data.clone()
     orig_b = orig_model.classifier.bias.data.clone()
     del orig_model
@@ -236,7 +240,7 @@ def main():
         id2label=ID2LABEL,
         label2id=LABEL2ID,
         ignore_mismatched_sizes=True,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         attn_implementation="sdpa"
     )
 
