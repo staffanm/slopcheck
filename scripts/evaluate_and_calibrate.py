@@ -26,7 +26,12 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
+from backend.resolver import format_premise
 from backend.semantic import check_assessable
+
+def get_premise(row: dict) -> str:
+    sources = row.get("sources") or ([row["source"]] if "source" in row else [])
+    return format_premise(sources)
 
 LABEL2ID = {
     "supported": 0,
@@ -322,7 +327,7 @@ def main():
     print("=======================================================")
     cal_rows = load_jsonl(args.cal_data)
     print(f"Loaded {len(cal_rows)} calibration rows.")
-    cal_pairs = [(r["source"]["text"], r["claim"]) for r in cal_rows]
+    cal_pairs = [(get_premise(r), r["claim"]) for r in cal_rows]
     cal_targets = np.array([LABEL2ID[r["label"]] for r in cal_rows])
 
     raw_cal_logits = evaluator.predict_logits(cal_pairs)
@@ -371,7 +376,7 @@ def main():
     print("=======================================================")
     test_rows = load_jsonl(args.test_data)
     print(f"Loaded {len(test_rows)} test rows.")
-    test_pairs = [(r["source"]["text"], r["claim"]) for r in test_rows]
+    test_pairs = [(get_premise(r), r["claim"]) for r in test_rows]
     test_targets = [LABEL2ID[r["label"]] for r in test_rows]
 
     raw_test_logits = evaluator.predict_logits(test_pairs)
