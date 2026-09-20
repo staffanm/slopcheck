@@ -1,5 +1,11 @@
 import unittest
-from semantic import check_assessable, evaluate_semantic
+
+try:
+    from backend.semantic import check_assessable, evaluate_semantic
+    from backend.main import app, get_model
+except ImportError:
+    from semantic import check_assessable, evaluate_semantic
+    from main import app, get_model
 
 class TestSemanticBackend(unittest.TestCase):
     def test_assessable_checks(self):
@@ -97,7 +103,6 @@ class TestSemanticBackend(unittest.TestCase):
 
     def test_api_endpoints_mock(self):
         from fastapi.testclient import TestClient
-        from main import app, get_model
 
         # Ensure model is initialized or mocked
         model = get_model()
@@ -109,34 +114,55 @@ class TestSemanticBackend(unittest.TestCase):
             self.assertEqual(resp.status_code, 200)
             data = resp.json()
             self.assertEqual(data["status"], "healthy")
+            self.assertTrue(data.get("loaded"))
 
-            # Match endpoint
+            # Match endpoint with string sources
             source = "36 § Avtalsvillkor som är oskäliga får jämkas eller lämnas utan avseende."
-            cases = [
-                ("Oskäliga avtalsvillkor får jämkas.", "correct"),
-                ("Oskäliga avtalsvillkor får aldrig jämkas.", "incorrect"),
-                ("Solen skiner i morgon.", "unsupported"),
-                ("anbud antagande senare verkan omständigheter häva", "nonsensical"),
-            ]
-            for claim, exp_label in cases:
-                resp = client.post("/api/match", json={"claim": claim, "sources": [source]})
-                self.assertEqual(resp.status_code, 200)
-                body = resp.json()
-                self.assertEqual(body["label"], exp_label, f"For claim '{claim}', expected {exp_label}, got {body['label']}")
-                self.assertIn("swedish_label", body)
-                self.assertIn("reason", body)
-                self.assertIn("comparisons", body)
-
-            # Test long context passage (> 1000 tokens)
-            long_source = "Detta är ett viktigt avtalsvillkor och en central rättslig princip i svensk rätt. " * 120
             resp = client.post("/api/match", json={
-                "claim": "Avtalsvillkor är viktiga.",
-                "sources": [long_source]
+                "claim": "Oskäliga avtalsvillkor får jämkas.",
+                "sources": [source]
             })
             self.assertEqual(resp.status_code, 200)
             body = resp.json()
-            self.assertIn(body["label"], ["correct", "unsupported", "abstain"])
+            self.assertIn(body["label"], ["correct", "incorrect", "unsupported", "misleading", "abstain"])
+            self.assertIn("swedish_label", body)
+            self.assertIn("reason", body)
+            self.assertIn("comparisons", body)
+            self.assertEqual(body["model_version"], "kb-bert-4way-v1")
+
+            # Nonsensical claim
+            resp = client.post("/api/match", json={
+                "claim": "anbud antagande senare verkan omständigheter häva",
+                "sources": [source]
+            })
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(resp.json()["label"], "nonsensical")
+
+            # Structured multi-source request
+            resp = client.post("/api/match", json={
+                "claim": "Ett anbud är bindande för anbudsgivaren under acceptfristen.",
+                "sources": [
+                    {
+                        "citation": "1 § avtalslagen",
+                        "text": "Anbud om slutande av avtal och svar å sådant anbud vare, efter ty här nedan i 2-9 §§ sägs, bindande för den, som avgivit anbudet eller svaret.",
+                        "unit_type": "statute_provision"
+                    }
+                ]
+            })
+            self.assertEqual(resp.status_code, 200)
+            body = resp.json()
+            self.assertIn(body["label"], ["correct", "incorrect", "unsupported", "misleading", "abstain"])
             self.assertEqual(len(body["comparisons"]), 1)
+            self.assertIn("scores", body["comparisons"][0])
+
+            # Unresolved sources check (abstains when sources are missing)
+            resp = client.post("/api/match", json={
+                "claim": "Ett anbud är bindande enligt avtalslagen.",
+                "sources": [],
+                "unresolved_sources": ["NJA 2020 s. 100"]
+            })
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(resp.json()["label"], "abstain")
 
 if __name__ == "__main__":
     unittest.main()

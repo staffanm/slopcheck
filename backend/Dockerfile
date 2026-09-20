@@ -6,15 +6,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
+COPY backend/requirements.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY backend/ /app/backend/
 
 ENV PORT=8000
-ENV MODEL_NAME=BalaRajesh1/mmbert-small-nli
-ENV NUM_THREADS=2
+ENV PYTHONPATH=/app
+ENV MODEL_DIR=/app/models/classifier-kb-bert-4way
+ENV NUM_THREADS=3
 
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

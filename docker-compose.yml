@@ -13,17 +13,16 @@ services:
       - backend
 
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     image: slopcheck-backend:latest
     container_name: slopcheck-backend
     restart: unless-stopped
     environment:
-      - MODEL_NAME=BalaRajesh1/mmbert-small-nli
-      - NUM_THREADS=2
+      - MODEL_DIR=/app/models/classifier-kb-bert-4way
+      - NUM_THREADS=3
     volumes:
-      - hf-cache:/root/.cache/huggingface
+      - ./models/classifier-kb-bert-4way:/app/models/classifier-kb-bert-4way:ro
     ports:
       - "127.0.0.1:8098:8000"
-
-volumes:
-  hf-cache:
