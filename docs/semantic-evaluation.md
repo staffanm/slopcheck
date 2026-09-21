@@ -1,5 +1,12 @@
 # Experimental semantic comparison
 
+**Update, 21 September 2026.** Privacy mode now ships `scandi-nli-small-legal-v2-q8`, the same
+architecture fine-tuned on the repaired training data with one merged premise window and
+thresholds calibrated fail-closed into the manifest (neutral 0.876; entailment and contradiction
+disabled). The sections below describe the original weights and the measurements that led to the
+passage shape; [classifier-training-review.md](classifier-training-review.md) has the review,
+the repairs and the new numbers.
+
 ## What ships
 
 The browser runs ScandiNLI small through ONNX Runtime Web.

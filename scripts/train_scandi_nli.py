@@ -4,11 +4,17 @@ Fine-tunes alexandrainst/scandi-nli-small on Swedish legal data preserving the 3
 Labels:
   0: entailment (supported)
   1: neutral (unsupported)
-  2: contradiction (incorrect & misleading)
+  2: contradiction (incorrect)
+Misleading claims map to neutral: the source supports their core case and does
+not contradict them, and test/fixtures/source-grounding.json expects the
+three-way model to say unsupported for them.
 """
 
 import argparse
 import json
+from collections import Counter
+import math
+import random
 import time
 from pathlib import Path
 from typing import Any
@@ -18,12 +24,13 @@ from torch.utils.data import DataLoader, Dataset
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
 
 from backend.windowing import window_premise
+from scripts.train_kb_bert import header_variants
 
 LABEL2ID_3WAY = {
     "supported": 0,
     "unsupported": 1,
     "incorrect": 2,
-    "misleading": 2
+    "misleading": 1
 }
 ID2LABEL_3WAY = {0: "entailment", 1: "neutral", 2: "contradiction"}
 
@@ -58,9 +65,10 @@ class Windowed3WayDataset(Dataset):
                 row = json.loads(line)
                 sources = row.get("sources") or ([row["source"]] if "source" in row else [])
                 claim = row["claim"]
-                premise = window_premise(claim, sources, max_premise_tokens=max_premise_tokens, tokenizer=tokenizer)
+                variants = header_variants(sources) if is_train else [sources]
+                premises = [window_premise(claim, v, max_premise_tokens=max_premise_tokens, tokenizer=tokenizer) for v in variants]
                 self.examples.append({
-                    "premise": premise,
+                    "premises": premises,
                     "hypothesis": claim,
                     "label": LABEL2ID_3WAY[row["label"]],
                     "id": row.get("id", "")
@@ -71,7 +79,7 @@ class Windowed3WayDataset(Dataset):
             for premise, hypothesis, label in ATTRIBUTION_AUGMENTATIONS:
                 for rep in range(20):
                     self.examples.append({
-                        "premise": premise,
+                        "premises": [premise],
                         "hypothesis": hypothesis,
                         "label": label,
                         "id": f"aug_{label}_{rep}"
@@ -81,7 +89,8 @@ class Windowed3WayDataset(Dataset):
         return len(self.examples)
 
     def __getitem__(self, idx):
-        return self.examples[idx]
+        example = self.examples[idx]
+        return {"premise": random.choice(example["premises"]), "hypothesis": example["hypothesis"], "label": example["label"], "id": example["id"]}
 
 
 class CollateFn:
@@ -182,6 +191,7 @@ def main():
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
+    random.seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
@@ -218,12 +228,15 @@ def main():
         {"params": classifier_params, "lr": args.lr * 3.0}
     ], weight_decay=0.01)
 
-    total_steps = (len(train_loader) // args.grad_accum) * args.epochs
+    total_steps = math.ceil(len(train_loader) / args.grad_accum) * args.epochs
     warmup_steps = int(total_steps * 0.06)
     scheduler = get_linear_schedule_with_warmup(optimizer, warmup_steps, total_steps)
 
-    # Balanced class weights (avoid suppressing entailment)
-    class_weights = torch.tensor([1.0, 1.1, 1.0], device=device, dtype=torch.float32)
+    # Inverse-frequency class weights, scaled so the largest class has weight 1
+    label_counts = Counter(example["label"] for example in train_dataset.examples)
+    weights = [max(label_counts.values()) / max(label_counts.get(i, 1), 1) for i in range(3)]
+    print("Class weights:", {ID2LABEL_3WAY[i]: round(w, 3) for i, w in enumerate(weights)})
+    class_weights = torch.tensor(weights, device=device, dtype=torch.float32)
     loss_fct = torch.nn.CrossEntropyLoss(weight=class_weights)
 
     best_macro_f1 = 0.0

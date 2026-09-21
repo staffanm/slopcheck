@@ -1,26 +1,33 @@
 {
-  "model": "alexandrainst/scandi-nli-small",
+  "model": "models/classifier-scandi-nli-small-3way-v2",
   "revision": "5c7d1eec144f2342823d829693d19cf5230b32a9",
-  "version": "scandi-nli-small-5c7d1ee-q8-v1",
+  "version": "scandi-nli-small-legal-v2-q8",
   "license": "Apache-2.0",
   "quantization": "symmetric int8 weights, float32 activations",
-  "premise": "passage",
+  "premise": "window",
   "files": {
     "model.onnx": {
-      "bytes": 22323359,
-      "sha256": "29850f27b58ff0b31d45f385611dd2a88f4c665154eedd182a8ab25202b0549c"
+      "bytes": 22299101,
+      "sha256": "d0107294cdf8a4d1a09eb18e9b7b3f9b1da7e7593da81f026b92aae39bc6c5f7"
     },
     "tokenizer.json": {
-      "bytes": 2301084,
-      "sha256": "a1e0d43ee307ad7a1ccc23e6e5398d877a68ca7f576067ac507625a0d50e9502"
+      "bytes": 2301337,
+      "sha256": "c7915bcf7866d950d9eac0e119813c212e4f73d53ad9f754e00fd0eb643ef47f"
     },
     "tokenizer_config.json": {
-      "bytes": 1270,
-      "sha256": "08c446673f7b1acbd52cfa1ed05eaaf5bf6223419b094d2dceb3ebf2832f6a3c"
+      "bytes": 595,
+      "sha256": "c3ab3bbefad45a44ecd0d688af120f07b699ee689425207143371328049f43dc"
     },
     "config.json": {
-      "bytes": 1065,
-      "sha256": "349bc35e35ffa75f7c5581899bbf922f5920582988ad74c3002a68589af2d841"
+      "bytes": 1100,
+      "sha256": "3aa48140aea9adaa8e33c52c6d263c9db65b76b1652853eefd5fc0824d8429af"
     }
+  },
+  "thresholds": {
+    "supported": 1.01,
+    "neutral": 0.8757,
+    "contradiction": 1.01,
+    "calibration_rows": 672,
+    "policy": "fail-closed, targets 0.95/0.90/0.95, Wilson slack 0.05, minimum 30 accepted; 1.01 disables a label"
   }
 }

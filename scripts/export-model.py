@@ -31,10 +31,13 @@ DEFAULT_OUTPUT = Path(__file__).resolve().parents[1] / "public" / "models" / VER
 def main():
     parser = argparse.ArgumentParser(description="Export ScandiNLI model with 8-bit weights for ONNX Runtime Web.")
     parser.add_argument("--model-dir", type=str, default=MODEL, help="Model path or HF repo name")
-    parser.add_argument("--output-dir", type=str, default=str(DEFAULT_OUTPUT), help="Output directory")
+    parser.add_argument("--output-dir", type=str, default=None, help="Output directory (default public/models/<version>)")
+    parser.add_argument("--version", type=str, default=VERSION, help="Model version string used in the manifest and asset path")
+    parser.add_argument("--premise", type=str, default="passage", choices=["passage", "window"],
+                        help="Premise shape the weights were trained on; the browser worker reads it from the manifest")
     args = parser.parse_args()
 
-    output = Path(args.output_dir)
+    output = Path(args.output_dir) if args.output_dir else DEFAULT_OUTPUT.parent / args.version
     output.mkdir(parents=True, exist_ok=True)
     if Path(args.model_dir).is_dir():
         tokenizer = AutoTokenizer.from_pretrained(args.model_dir)
@@ -83,7 +86,7 @@ def main():
     onnx.save(graph, output / "model.onnx")
     files = {name: {"bytes": (output / name).stat().st_size, "sha256": hashlib.sha256((output / name).read_bytes()).hexdigest()}
              for name in ["model.onnx", "tokenizer.json", "tokenizer_config.json", "config.json"]}
-    manifest = {"model": args.model_dir, "revision": REVISION, "version": VERSION, "license": "Apache-2.0", "quantization": "symmetric int8 weights, float32 activations", "premise": "passage", "files": files}
+    manifest = {"model": args.model_dir, "revision": REVISION, "version": args.version, "license": "Apache-2.0", "quantization": "symmetric int8 weights, float32 activations", "premise": args.premise, "files": files}
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(json.dumps(manifest, indent=2))
 

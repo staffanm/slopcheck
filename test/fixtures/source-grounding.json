@@ -1,0 +1,348 @@
+{
+  "schema_version": 1,
+  "name": "source-grounding-development-regression",
+  "description": "Contrastive diagnostics for whether a Swedish legal claim is grounded in the supplied provision, rather than merely plausible in isolation.",
+  "split_policy": "Development regression set. These examples are known during development, are not an untouched held-out benchmark, and must not be used for training, fine-tuning, calibration, threshold selection, or model selection.",
+  "label_semantics": {
+    "supported": "The supplied source supports the material proposition.",
+    "unsupported": "The supplied source neither supports nor directly contradicts the material proposition, including a true rule paired with the wrong provision.",
+    "incorrect": "The supplied source directly conflicts with a material proposition.",
+    "misleading": "The proposition overstates the supplied rule or omits a material condition or exception. Three-way NLI models are expected to treat this as neutral/unsupported."
+  },
+  "sources": {
+    "avtl-4": {
+      "citation": "4 § avtalslagen (1915:218)",
+      "uri": "https://lagen.nu/1915:218#P4",
+      "provenance": "Verbatim local regression source: test/fixtures/legal-sources/avtalslagen-4.md",
+      "text": "**4 §** Antagande svar, som för sent kommer anbudsgivaren till handa, skall gälla såsom nytt anbud.\n\nVad nu är sagt äge dock icke tillämpning, där den, som avsänt svaret, utgår från att det framkommit i rätt tid och mottagaren måste inse detta. I ty fall åligger det denne, om han icke vill godtaga svaret, att utan oskäligt uppehåll giva avsändaren meddelande därom; underlåter han det, anses avtal hava genom svaret kommit till stånd."
+    },
+    "hb-10-9": {
+      "citation": "10 kap. 9 § handelsbalken",
+      "uri": "https://lagen.nu/1736:0123_2#K10P9",
+      "provenance": "Original provision text supplied for this diagnostic; spelling preserved verbatim from lagen.nu.",
+      "text": "Nu haver löftesman sig åtagit annan mans gäld, som sin egen, och utfäst betalning å viss tid, eller ort, eller ock sig lika med gäldenären där till förbundit; söke då borgenär vilkendera han helst vill."
+    },
+    "avtl-36": {
+      "citation": "36 § avtalslagen (1915:218)",
+      "uri": "https://lagen.nu/1915:218#P36",
+      "provenance": "Verbatim local regression source: test/fixtures/legal-sources/avtalslagen-36.md",
+      "text": "**36 §** Avtalsvillkor får jämkas eller lämnas utan avseende, om villkoret är oskäligt med hänsyn till avtalets innehåll, omständigheterna vid avtalets tillkomst, senare inträffade förhållanden och omständigheterna i övrigt. Har villkoret sådan betydelse för avtalet att det icke skäligen kan krävas att detta i övrigt skall gälla med oförändrat innehåll, får avtalet jämkas även i annat hänseende eller i sin helhet lämnas utan avseende.\n\nVid prövning enligt [första stycket](https://lagen.nu/1915:218#P36S1) skall särskild hänsyn tagas till behovet av skydd för den som i egenskap av konsument eller eljest intager en underlägsen ställning i avtalsförhållandet.\n\nFörsta och andra styckena äga motsvarande tillämpning i fråga om villkor vid annan rättshandling än avtal.\n\nI fråga om jämkning av vissa avtalsvillkor i konsumentförhållanden gäller dessutom [11 § lagen (1994:1512)](https://lagen.nu/1994:1512#P11) om avtalsvillkor i konsumentförhållanden. [Lag (1994:1513).](https://lagen.nu/1915:218#L1994:1513)"
+    },
+    "preskl-2": {
+      "citation": "2 § preskriptionslagen (1981:130)",
+      "uri": "https://lagen.nu/1981:130#P2",
+      "provenance": "Verbatim local regression source: test/fixtures/legal-sources/preskriptionslagen-2.md",
+      "text": "**2 §** En fordran preskriberas tio år efter tillkomsten, om inte preskriptionen avbryts dessförinnan.\n\nPreskriptionstiden är dock tre år för fordran mot en konsument, om fordringen avser en vara, tjänst eller annan nyttighet som en näringsidkare i sin yrkesmässiga verksamhet har tillhandahållit konsumenten för huvudsakligen enskilt bruk. Detsamma gäller fordran mot den som har gått i borgen för betalningen av en sådan fordran. Den treåriga preskriptionstiden gäller dock inte fordringar som grundar sig på löpande skuldebrev.\n\nFör fordran på pension räknas preskriptionstiden från den dag fordringen tidigast kan göras gällande."
+    },
+    "rantel-6": {
+      "citation": "6 § räntelagen (1975:635)",
+      "uri": "https://lagen.nu/1975:635#P6",
+      "provenance": "Verbatim local regression source: test/fixtures/legal-sources/rantelagen-6.md",
+      "text": "**6 §** I fall som avses i 3 eller [4 §](https://lagen.nu/1975:635#P4) beräknas ränta för år enligt en räntefot som motsvarar den vid varje tid gällande referensräntan enligt [9 §](https://lagen.nu/1975:635#P9) med ett tillägg av åtta procentenheter. Om det vid bestämmande av skadestånd med anledning av personskada ska avräknas förmåner som en skadelidande har rätt till enligt [5 kap. 3 § 1 skadeståndslagen (1972:207)](https://lagen.nu/1972:207#K5P3S1N1), utgör dock tillägget till referensräntan endast två procentenheter för tiden till dess förmånerna har fastställts slutligt.\n\nEtt avtalsvillkor som innebär att räntan ska beräknas enligt en lägre räntefot än vad som följer av [första stycket](https://lagen.nu/1975:635#P6S1) första meningen är utan verkan mot borgenären i ett förhållande mellan en näringsidkare och en myndighet eller ett annat offentligt organ, när näringsidkaren i sin yrkesmässiga verksamhet tillhandahåller varor eller tjänster mot betalning. [Lag (2013:55).](https://lagen.nu/1975:635#L2013:55)"
+    },
+    "kopl-32": {
+      "citation": "32 § köplagen (1990:931)",
+      "uri": "https://lagen.nu/1990:931#P32",
+      "provenance": "Verbatim local regression source: test/fixtures/legal-sources/koplagen-32.md",
+      "text": "**32 §** Köparen får inte åberopa att varan är felaktig, om han inte lämnar säljaren meddelande om felet inom skälig tid efter det att han märkt eller borde ha märkt felet ([reklamation](https://lagen.nu/begrepp/Reklamation)).\n\nReklamerar köparen inte inom två år från det att han har tagit emot varan, förlorar han rätten att åberopa felet, om inte annat följer av en garanti eller liknande utfästelse."
+    },
+    "rb-18-1": {
+      "citation": "18 kap. 1 § rättegångsbalken",
+      "uri": "https://lagen.nu/1942:740#K18P1",
+      "provenance": "Verbatim local regression source: test/fixtures/legal-sources/rattegangsbalken-18kap.md",
+      "text": "## [18 kap.](https://lagen.nu/1942:740#K18) Om rättegångskostnad\n\n**1 §** Part, som tappar målet, skall ersätta motparten hans rättegångskostnad, om ej annat är stadgat."
+    }
+  },
+  "examples": [
+    {
+      "id": "proprieborgen-wrong-citation-exact",
+      "contrast_set": "proprieborgen-source-swap",
+      "claim": "Detta följer av svensk rätt, särskilt 4 § avtalslagen (1915:218), som stadgar att när en person åtar sig ett borgensåtagande 'som för egen skuld', dvs. proprieborgen, har borgenären rätt att kräva betalning direkt från borgensmannen.",
+      "source_id": "avtl-4",
+      "expected": {"4way": "unsupported", "3way": "unsupported"},
+      "phenomenon": "plausible rule attributed to unrelated provision",
+      "rationale": "The source concerns late acceptance and says nothing about guarantees; lexical legal plausibility must not substitute for source support.",
+      "claim_provenance": "Exact guarantee example from test/fixtures/legal-claims.json."
+    },
+    {
+      "id": "proprieborgen-no-citation-wrong-source",
+      "contrast_set": "proprieborgen-source-swap",
+      "claim": "När en borgensman åtar sig en skuld som sin egen får borgenären kräva betalning direkt från borgensmannen.",
+      "source_id": "avtl-4",
+      "expected": {"4way": "unsupported", "3way": "unsupported"},
+      "phenomenon": "citation-free true proposition with unrelated source",
+      "rationale": "Removing the explicit miscitation must not make an unrelated late-acceptance provision appear supportive.",
+      "claim_provenance": "Diagnostic paraphrase of the exact guarantee example."
+    },
+    {
+      "id": "proprieborgen-no-citation-correct-source",
+      "contrast_set": "proprieborgen-source-swap",
+      "claim": "När en borgensman åtar sig en skuld som sin egen får borgenären kräva betalning direkt från borgensmannen.",
+      "source_id": "hb-10-9",
+      "expected": {"4way": "supported", "3way": "supported"},
+      "phenomenon": "same claim with correct source",
+      "rationale": "The source expressly lets the creditor choose the guarantor where the guarantor undertook the debt as their own.",
+      "claim_provenance": "Diagnostic paraphrase of the exact guarantee example."
+    },
+    {
+      "id": "proprieborgen-archaic-paraphrase",
+      "contrast_set": "proprieborgen-source-swap",
+      "claim": "En löftesman som har åtagit sig annans gäld såsom sin egen kan krävas direkt av borgenären.",
+      "source_id": "hb-10-9",
+      "expected": {"4way": "supported", "3way": "supported"},
+      "phenomenon": "modern paraphrase of archaic source language",
+      "rationale": "This preserves the provision's parties and direct-choice consequence using a shorter paraphrase.",
+      "claim_provenance": "Authored diagnostic."
+    },
+    {
+      "id": "proprieborgen-must-pursue-debtor-first",
+      "contrast_set": "proprieborgen-source-swap",
+      "claim": "Vid borgen såsom för egen skuld måste borgenären först kräva gäldenären innan borgensmannen får krävas.",
+      "source_id": "hb-10-9",
+      "expected": {"4way": "incorrect", "3way": "incorrect"},
+      "phenomenon": "direct contradiction",
+      "rationale": "The source permits the creditor to pursue whichever party the creditor chooses, contradicting a debtor-first requirement.",
+      "claim_provenance": "Authored diagnostic."
+    },
+    {
+      "id": "late-acceptance-correct",
+      "contrast_set": "late-acceptance",
+      "claim": "Enligt 4 § avtalslagen (1915:218) gäller ett antagande svar som kommer anbudsgivaren till handa för sent som ett nytt anbud.",
+      "source_id": "avtl-4",
+      "expected": {"4way": "supported", "3way": "supported"},
+      "phenomenon": "verbatim-rule paraphrase",
+      "rationale": "The claim accurately states the first paragraph's main rule.",
+      "claim_provenance": "Exact example from test/fixtures/legal-claims.json."
+    },
+    {
+      "id": "late-acceptance-wrong-source",
+      "contrast_set": "late-acceptance",
+      "claim": "Ett antagande svar som kommer anbudsgivaren till handa för sent gäller som ett nytt anbud.",
+      "source_id": "hb-10-9",
+      "expected": {"4way": "unsupported", "3way": "unsupported"},
+      "phenomenon": "same legal rule with unrelated source",
+      "rationale": "The guarantee provision does not address offers, acceptances, or lateness.",
+      "claim_provenance": "Citation-free variant of a fixture example."
+    },
+    {
+      "id": "late-acceptance-no-effect",
+      "contrast_set": "late-acceptance",
+      "claim": "Enligt 4 § avtalslagen är ett sent antagande svar utan verkan och kan inte leda till avtal.",
+      "source_id": "avtl-4",
+      "expected": {"4way": "incorrect", "3way": "incorrect"},
+      "phenomenon": "direct contradiction",
+      "rationale": "The source says a late answer operates as a new offer and also describes a situation where an agreement results.",
+      "claim_provenance": "Condensed variant of late-acceptance-void in test/fixtures/legal-claims.json."
+    },
+    {
+      "id": "late-acceptance-always",
+      "contrast_set": "late-acceptance",
+      "claim": "Ett för sent inkommet svar gäller alltid som ett nytt anbud enligt 4 § avtalslagen (1915:218), oavsett vad mottagaren insåg om förseningen.",
+      "source_id": "avtl-4",
+      "expected": {"4way": "misleading", "3way": "unsupported"},
+      "phenomenon": "omitted exception",
+      "rationale": "The absolute wording drops the second paragraph's exception where the sender assumes timely arrival and the recipient must realize that.",
+      "claim_provenance": "Exact example from test/fixtures/legal-claims.json."
+    },
+    {
+      "id": "late-acceptance-exception",
+      "contrast_set": "late-acceptance",
+      "claim": "Om avsändaren utgår från att svaret kom fram i tid och mottagaren måste inse detta kan mottagarens underlåtenhet att meddela dröjsmålet leda till att avtal anses ingånget.",
+      "source_id": "avtl-4",
+      "expected": {"4way": "supported", "3way": "supported"},
+      "phenomenon": "condition-preserving paraphrase",
+      "rationale": "The claim retains both knowledge conditions and the consequence of failing to notify without unreasonable delay.",
+      "claim_provenance": "Authored diagnostic."
+    },
+    {
+      "id": "unfair-terms-correct",
+      "contrast_set": "unfair-terms",
+      "claim": "Avtalsvillkor som är oskäliga får enligt 36 § avtalslagen (1915:218) jämkas eller lämnas utan avseende.",
+      "source_id": "avtl-36",
+      "expected": {"4way": "supported", "3way": "supported"},
+      "phenomenon": "close paraphrase",
+      "rationale": "This is the remedy stated in the source for unfair contract terms.",
+      "claim_provenance": "Exact example from test/fixtures/legal-claims.json."
+    },
+    {
+      "id": "unfair-terms-wrong-source",
+      "contrast_set": "unfair-terms",
+      "claim": "Avtalsvillkor som är oskäliga får jämkas eller lämnas utan avseende.",
+      "source_id": "preskl-2",
+      "expected": {"4way": "unsupported", "3way": "unsupported"},
+      "phenomenon": "same legal rule with unrelated source",
+      "rationale": "The limitation provision does not discuss contract terms or adjustment.",
+      "claim_provenance": "Citation-free variant of a fixture example."
+    },
+    {
+      "id": "unfair-terms-no-adjustment",
+      "contrast_set": "unfair-terms",
+      "claim": "36 § avtalslagen anger att avtalsvillkor inte får jämkas även om de är oskäliga.",
+      "source_id": "avtl-36",
+      "expected": {"4way": "incorrect", "3way": "incorrect"},
+      "phenomenon": "direct contradiction",
+      "rationale": "The source expressly permits adjustment of an unfair term.",
+      "claim_provenance": "Condensed variant of unfair-terms-no-adjustment in test/fixtures/legal-claims.json."
+    },
+    {
+      "id": "unfair-terms-consumers-only",
+      "contrast_set": "unfair-terms",
+      "claim": "Enligt 36 § avtalslagen (1915:218) kan endast konsumenter få oskäliga avtalsvillkor jämkade.",
+      "source_id": "avtl-36",
+      "expected": {"4way": "misleading", "3way": "unsupported"},
+      "phenomenon": "scope restriction not present in source",
+      "rationale": "Consumers receive special consideration, but the first paragraph is not limited to consumers.",
+      "claim_provenance": "Exact example from test/fixtures/legal-claims.json."
+    },
+    {
+      "id": "limitation-ten-years",
+      "contrast_set": "limitation",
+      "claim": "Huvudregeln i 2 § preskriptionslagen (1981:130) är att en fordran preskriberas tio år efter tillkomsten, om inte preskriptionen avbryts dessförinnan.",
+      "source_id": "preskl-2",
+      "expected": {"4way": "supported", "3way": "supported"},
+      "phenomenon": "condition-preserving paraphrase",
+      "rationale": "The claim accurately identifies the first paragraph as the main rule and preserves interruption as a condition.",
+      "claim_provenance": "Exact example from test/fixtures/legal-claims.json."
+    },
+    {
+      "id": "limitation-wrong-source",
+      "contrast_set": "limitation",
+      "claim": "En fordran preskriberas som huvudregel tio år efter tillkomsten om preskriptionen inte avbryts.",
+      "source_id": "avtl-36",
+      "expected": {"4way": "unsupported", "3way": "unsupported"},
+      "phenomenon": "same legal rule with unrelated source",
+      "rationale": "The unfair-terms provision supplies no limitation period.",
+      "claim_provenance": "Citation-free paraphrase of a fixture example."
+    },
+    {
+      "id": "limitation-five-years",
+      "contrast_set": "limitation",
+      "claim": "Enligt 2 § preskriptionslagen preskriberas en fordran fem år efter tillkomsten.",
+      "source_id": "preskl-2",
+      "expected": {"4way": "incorrect", "3way": "incorrect"},
+      "phenomenon": "wrong number contradiction",
+      "rationale": "The source states ten years as the general period and three years for the described consumer claims, not five years.",
+      "claim_provenance": "Condensed variant of limitation-five-years in test/fixtures/legal-claims.json."
+    },
+    {
+      "id": "limitation-all-ten-years",
+      "contrast_set": "limitation",
+      "claim": "Alla fordringar preskriberas tio år efter tillkomsten; det finns ingen kortare tid för konsumentfordringar.",
+      "source_id": "preskl-2",
+      "expected": {"4way": "misleading", "3way": "unsupported"},
+      "phenomenon": "omitted statutory exception",
+      "rationale": "The claim turns the main rule into an absolute and denies the express three-year consumer rule.",
+      "claim_provenance": "Citation-free variant of limitation-no-consumer-rule in test/fixtures/legal-claims.json."
+    },
+    {
+      "id": "interest-eight-points",
+      "contrast_set": "default-interest",
+      "claim": "Dröjsmålsräntan är enligt 6 § räntelagen (1975:635) referensräntan med ett tillägg av åtta procentenheter.",
+      "source_id": "rantel-6",
+      "expected": {"4way": "supported", "3way": "supported"},
+      "phenomenon": "close paraphrase",
+      "rationale": "The claim states the first sentence's ordinary calculation rule.",
+      "claim_provenance": "Exact example from test/fixtures/legal-claims.json."
+    },
+    {
+      "id": "interest-wrong-source",
+      "contrast_set": "default-interest",
+      "claim": "Dröjsmålsräntan motsvarar referensräntan med ett tillägg av åtta procentenheter.",
+      "source_id": "kopl-32",
+      "expected": {"4way": "unsupported", "3way": "unsupported"},
+      "phenomenon": "same legal rule with unrelated source",
+      "rationale": "The sale-of-goods complaint provision contains no rule about interest.",
+      "claim_provenance": "Citation-free variant of a fixture example."
+    },
+    {
+      "id": "interest-twelve-points",
+      "contrast_set": "default-interest",
+      "claim": "Dröjsmålsräntan är enligt 6 § räntelagen referensräntan med ett tillägg av tolv procentenheter.",
+      "source_id": "rantel-6",
+      "expected": {"4way": "incorrect", "3way": "incorrect"},
+      "phenomenon": "wrong number contradiction",
+      "rationale": "The source specifies eight percentage points in the ordinary case and two in its exception, never twelve.",
+      "claim_provenance": "Condensed variant of interest-twelve-points-verb in test/fixtures/legal-claims.json."
+    },
+    {
+      "id": "interest-always-eight",
+      "contrast_set": "default-interest",
+      "claim": "Tillägget till referensräntan är alltid åtta procentenheter enligt 6 § räntelagen.",
+      "source_id": "rantel-6",
+      "expected": {"4way": "misleading", "3way": "unsupported"},
+      "phenomenon": "omitted exception",
+      "rationale": "The source provides a temporary two-point exception for a specified personal-injury damages calculation.",
+      "claim_provenance": "Authored diagnostic based on interest-two-points in test/fixtures/legal-claims.json."
+    },
+    {
+      "id": "complaint-two-years",
+      "contrast_set": "goods-complaint",
+      "claim": "Enligt 32 § köplagen (1990:931) förlorar köparen rätten att åberopa ett fel om han inte reklamerar inom två år från det att han tagit emot varan, om inte annat följer av en garanti.",
+      "source_id": "kopl-32",
+      "expected": {"4way": "supported", "3way": "supported"},
+      "phenomenon": "condition-preserving paraphrase",
+      "rationale": "The claim retains the two-year limit and the guarantee exception.",
+      "claim_provenance": "Exact example from test/fixtures/legal-claims.json."
+    },
+    {
+      "id": "complaint-wrong-source",
+      "contrast_set": "goods-complaint",
+      "claim": "Köparen förlorar normalt rätten att åberopa fel om reklamation inte sker inom två år från mottagandet.",
+      "source_id": "rantel-6",
+      "expected": {"4way": "unsupported", "3way": "unsupported"},
+      "phenomenon": "same legal rule with unrelated source",
+      "rationale": "The interest provision says nothing about sales, defects, or complaints.",
+      "claim_provenance": "Citation-free paraphrase of a fixture example."
+    },
+    {
+      "id": "complaint-three-years",
+      "contrast_set": "goods-complaint",
+      "claim": "Enligt 32 § köplagen har köparen tre år på sig att reklamera ett fel i varan.",
+      "source_id": "kopl-32",
+      "expected": {"4way": "incorrect", "3way": "incorrect"},
+      "phenomenon": "wrong number contradiction",
+      "rationale": "The source gives an ultimate two-year period, subject to guarantee or similar undertaking, not three years.",
+      "claim_provenance": "Condensed variant of complaint-three-years in test/fixtures/legal-claims.json."
+    },
+    {
+      "id": "complaint-no-reasonable-time",
+      "contrast_set": "goods-complaint",
+      "claim": "Köparen får åberopa fel när som helst inom två år utan krav på att reklamera inom skälig tid.",
+      "source_id": "kopl-32",
+      "expected": {"4way": "misleading", "3way": "unsupported"},
+      "phenomenon": "omitted cumulative condition",
+      "rationale": "The two-year outer limit does not displace the first paragraph's reasonable-time requirement.",
+      "claim_provenance": "Citation-free variant of complaint-no-reasonable-time in test/fixtures/legal-claims.json."
+    },
+    {
+      "id": "costs-loser-pays",
+      "contrast_set": "litigation-costs",
+      "claim": "Enligt 18 kap. 1 § rättegångsbalken ska den part som tappar målet ersätta motpartens rättegångskostnad, om inte annat är stadgat.",
+      "source_id": "rb-18-1",
+      "expected": {"4way": "supported", "3way": "supported"},
+      "phenomenon": "condition-preserving paraphrase",
+      "rationale": "The claim states both the loser-pays rule and its express reservation.",
+      "claim_provenance": "Exact example from test/fixtures/legal-claims.json."
+    },
+    {
+      "id": "costs-each-own",
+      "contrast_set": "litigation-costs",
+      "claim": "Enligt 18 kap. 1 § rättegångsbalken ska vardera parten alltid bära sin egen rättegångskostnad.",
+      "source_id": "rb-18-1",
+      "expected": {"4way": "incorrect", "3way": "incorrect"},
+      "phenomenon": "direct contradiction",
+      "rationale": "The source's default is that the losing party pays the opposing party's costs.",
+      "claim_provenance": "Exact example from test/fixtures/legal-claims.json."
+    },
+    {
+      "id": "costs-no-exception",
+      "contrast_set": "litigation-costs",
+      "claim": "Den förlorande parten ska enligt 18 kap. 1 § rättegångsbalken utan undantag ersätta motpartens rättegångskostnad.",
+      "source_id": "rb-18-1",
+      "expected": {"4way": "misleading", "3way": "unsupported"},
+      "phenomenon": "omitted exception",
+      "rationale": "The claim drops the provision's express reservation 'om ej annat är stadgat'.",
+      "claim_provenance": "Exact example from test/fixtures/legal-claims.json."
+    }
+  ]
+}

@@ -73,3 +73,20 @@ class TestCitedUnitResolver(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_deciding_dom_nodes_skips_lower_court_and_betankande():
+    from backend.resolver import deciding_dom_nodes
+    hovr = {"type": "dom", "children": [{"type": "domskal", "children": [{"type": "stycke", "text": "HovR:n anförde i beslut: Skäl."}]}]}
+    betankande = {"type": "betankande", "children": [{"type": "domskal", "children": [{"type": "stycke", "ordinal": "7", "text": "Föredraganden föreslog."}]}]}
+    hd = {"type": "dom", "children": [{"type": "domskal", "children": [{"type": "stycke", "ordinal": "7", "text": "HD fattade följande beslut."}]}]}
+    assert deciding_dom_nodes([hovr, betankande, hd]) == [hd]
+    assert deciding_dom_nodes([betankande, hd]) == [hd]
+
+
+def test_cut_dissent_drops_dissent_and_following_text():
+    from backend.resolver import cut_dissent
+    text = "Skäl. HD finner att talan ska bifallas.\n\nDomslut. HD bifaller talan.\n\nJustR Lind, med vilken JustR Gregow instämde, var skiljaktig och anförde: Talan borde ogillas.\n\nMer text."
+    assert cut_dissent(text) == "Skäl. HD finner att talan ska bifallas.\n\nDomslut. HD bifaller talan."
+    assert cut_dissent("Skäl. Hovrätten, som var skiljaktig i frågan, ansåg annat.") == "Skäl. Hovrätten, som var skiljaktig i frågan, ansåg annat."
+

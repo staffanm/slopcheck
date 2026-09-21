@@ -19,7 +19,11 @@ VERB_PATTERN = re.compile(
     r"påfördes|påföra|föreligger|uppkommer|betalas|upphör|förbjuder|räknas|ersätts|tillämpas|prövas|"
     r"prövade|beviljas|meddelas|träder|finns|fanns|kommer|kom|utgår|utgick|ingår|ingick|bortfaller|"
     r"åligger|utdöma|utdöms|utdömdes|fastställa|bifalla|ogilla|stadgar|stadgas|föreskriver|föreskrivs|"
-    r"skiner|heter|menar|påstår|hävdar|visar|gör|gjorde|vet|visste|känner|ser|såg|lämnar|lämnade)(?!\w)|"
+    r"skiner|heter|menar|påstår|hävdar|visar|gör|gjorde|vet|visste|känner|ser|såg|lämnar|lämnade|"
+    r"förlorar|sker|skedde|åberopar|betalar|svarar|erhåller|uppstår|äger|innehar|utövar|löper|börjar|"
+    r"upphörde|inträder|inträffar|tillkommer|förfaller|avbryts|avgör|avgörs|beslutar|lyder|behöver|behövs|"
+    r"väcks|väcker|överklagar|begär|yrkar|åtar|åtog|åtagit|ådrar|svarade|ansvarade|förlorade|"
+    r"förpliktar|förpliktas|befriar|befrias|fritar|befogenhet|förvärvar|förvärvas|övergår|återgår|jämkas)(?!\w)|"
     r"(?<!\w)\w{3,}(?:as|ade|ades)(?!\w)",
     re.IGNORECASE | re.UNICODE,
 )

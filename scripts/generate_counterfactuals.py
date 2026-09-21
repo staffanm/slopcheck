@@ -20,6 +20,7 @@ from typing import Any, Optional
 from transformers import AutoTokenizer
 
 from backend.resolver import CitedUnitResolver, format_premise
+from scripts.repair_dataset import citation_for_unit
 
 LLM_ENDPOINT = "http://127.0.0.1:8080/v1/chat/completions"
 LLM_MODEL = "qwen3.8-27b"
@@ -116,7 +117,7 @@ def find_adjacent_source(source: dict, resolver: CitedUnitResolver, all_sources:
         res = resolver.resolve(full_uri)
         if res.get("status") == "ok" and res.get("text"):
             return {
-                "citation": f"{source['citation']} (intilliggande)",
+                "citation": citation_for_unit(source["citation"], res.get("source_id", cand_uri).replace("https://lagen.nu/", ""), res.get("unit_type", u_type)),
                 "source_id": res.get("source_id", cand_uri).replace("https://lagen.nu/", ""),
                 "document_id": res.get("document_id", cand_uri.split("#")[0]).replace("https://lagen.nu/", ""),
                 "unit_type": res.get("unit_type", u_type),

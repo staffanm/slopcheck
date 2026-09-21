@@ -6,6 +6,9 @@ import { claimContext } from '../src/analysis.js';
 import { MODEL_VERSION, semanticClaim, semanticResult, scoresFromLogits, rowSemantic, matchesFilter } from '../src/semantic.js';
 import { modelPassages, pairInput, premiseWindow } from '../src/semantic-input.js';
 
+// The policy tests pin the provisional thresholds; the shipped manifest may disable labels.
+const PROVISIONAL = { supported: 0.97, contradiction: 0.97, neutral: 0.90, conflict: 0.50 };
+
 const tokenizer = new Tokenizer(...['tokenizer.json', 'tokenizer_config.json'].map(name => JSON.parse(readFileSync(new URL(`../public/models/${MODEL_VERSION}/${name}`, import.meta.url)))));
 const scores = (entailment, neutral, contradiction) => ({ entailment, neutral, contradiction });
 const comparison = (text, values) => ({ text, scores: values });
@@ -46,21 +49,21 @@ test('a citation-only paragraph uses the preceding sentence without changing doc
 test('label policy abstains on uncertain, conflicting and incomplete evidence', () => {
   const yes = comparison('Avsnitt A', scores(.99, .005, .005));
   const no = comparison('Avsnitt B', scores(.005, .005, .99));
-  assert.equal(semanticResult([yes]).status, 'correct');
-  assert.equal(semanticResult([no]).status, 'incorrect');
-  assert.equal(semanticResult([yes, no]).status, 'abstain');
-  assert.equal(semanticResult([yes], { incomplete: true }).status, 'abstain');
-  assert.equal(semanticResult([]).status, 'abstain');
-  assert.equal(semanticResult([comparison('Text', scores(.3, .5, .2))]).status, 'abstain');
-  const missing = semanticResult([comparison('Orelaterad text', scores(.01, .98, .01))]);
+  assert.equal(semanticResult([yes], { thresholds: PROVISIONAL }).status, 'correct');
+  assert.equal(semanticResult([no], { thresholds: PROVISIONAL }).status, 'incorrect');
+  assert.equal(semanticResult([yes, no], { thresholds: PROVISIONAL }).status, 'abstain');
+  assert.equal(semanticResult([yes], { thresholds: PROVISIONAL, incomplete: true }).status, 'abstain');
+  assert.equal(semanticResult([], { thresholds: PROVISIONAL }).status, 'abstain');
+  assert.equal(semanticResult([comparison('Text', scores(.3, .5, .2))], { thresholds: PROVISIONAL }).status, 'abstain');
+  const missing = semanticResult([comparison('Orelaterad text', scores(.01, .98, .01))], { thresholds: PROVISIONAL });
   assert.equal(missing.status, 'missing');
   assert.equal(missing.evidence.text, 'Orelaterad text');
-  const missingExact = semanticResult([comparison('4 § 1 st', scores(.07, .63, .30)), comparison('4 § 2 st', scores(.36, .33, .31))], { exact: true });
+  const missingExact = semanticResult([comparison('4 § 1 st', scores(.07, .63, .30)), comparison('4 § 2 st', scores(.36, .33, .31))], { thresholds: PROVISIONAL, exact: true });
   assert.equal(missingExact.status, 'missing');
   assert.equal(missingExact.evidence.text, '4 § 1 st');
-  const missingNonExact = semanticResult([comparison('4 § 1 st', scores(.07, .63, .30)), comparison('4 § 2 st', scores(.36, .33, .31))], { exact: false });
+  const missingNonExact = semanticResult([comparison('4 § 1 st', scores(.07, .63, .30)), comparison('4 § 2 st', scores(.36, .33, .31))], { thresholds: PROVISIONAL, exact: false });
   assert.equal(missingNonExact.status, 'abstain');
-  const archaicExact = semanticResult([comparison('10 kap. 9 § handelsbalken', scores(.13, .52, .35))], { exact: true });
+  const archaicExact = semanticResult([comparison('10 kap. 9 § handelsbalken', scores(.13, .52, .35))], { thresholds: PROVISIONAL, exact: true });
   assert.equal(archaicExact.status, 'abstain');
   assert.throws(() => scoresFromLogits([0, NaN, 1]));
   assert.equal(scoresFromLogits([1000, 0, 0]).entailment, 1);
@@ -101,8 +104,8 @@ test('a merged premise window keeps shared metadata and every included role', ()
   assert.equal(premiseWindow([], tokenizer, 'Ett påstående.'), null);
   // A window satisfies the attributed court's conclusion rule through its roles.
   const yes = { scores: scores(.99, .005, .005) };
-  assert.equal(semanticResult([{ ...yes, roles: ['reasoning'] }], { requireConclusion: true }).status, 'abstain');
-  assert.equal(semanticResult([{ ...yes, roles: window.roles }], { requireConclusion: true }).status, 'correct');
+  assert.equal(semanticResult([{ ...yes, roles: ['reasoning'] }], { thresholds: PROVISIONAL, requireConclusion: true }).status, 'abstain');
+  assert.equal(semanticResult([{ ...yes, roles: window.roles }], { thresholds: PROVISIONAL, requireConclusion: true }).status, 'correct');
 });
 
 test('multiple targets and semantic filters do not change source validity', () => {

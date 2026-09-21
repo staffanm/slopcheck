@@ -177,7 +177,7 @@ def main():
     # 4. Intra-partition negative & distractor assignment
     tokenizer = AutoTokenizer.from_pretrained("BalaRajesh1/mmbert-small-nli")
     for pname, prows in partitions.items():
-        p_valid_sources = [s for r in prows for s in r.get("sources", []) if r.get("transformation") not in ("topic_match", "distractor_source")]
+        p_valid_sources = [s for r in prows for s in r.get("sources", []) if r.get("transformation") not in ("topic_match", "distractor_source", "adjacent")]
         for r in prows:
             trans = r.get("transformation")
             orig_doc = r["origin_document_id"]

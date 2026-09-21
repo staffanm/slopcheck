@@ -27,6 +27,7 @@ from torch.utils.data import DataLoader, Dataset
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from backend.resolver import format_premise
+from backend.calibration import select_fail_closed_thresholds, selective_metrics
 from backend.semantic import check_assessable
 from backend.windowing import window_premise
 
@@ -236,84 +237,6 @@ class EvaluatorAndCalibrator:
         print(f"Optimal Temperature scaling parameter T: {opt_t:.4f} (NLL: {res.fun:.4f})")
         return opt_t
 
-    def select_thresholds(
-        self,
-        cal_probs: np.ndarray,
-        cal_targets: np.ndarray,
-        target_precisions: Dict[str, float]
-    ) -> Tuple[Dict[str, float], float]:
-        """
-        Derives per-class thresholds and minimum margin from the calibration partition
-        by maximizing coverage subject to target precision per accepted class.
-        """
-        p1 = np.max(cal_probs, axis=1)
-        preds = np.argmax(cal_probs, axis=1)
-        # Sort probabilities to get p1 and p2
-        sorted_probs = np.sort(cal_probs, axis=1)
-        p2 = sorted_probs[:, -2]
-        margins = p1 - p2
-
-        best_margin = 0.05
-        best_thresholds = {"supported": 0.50, "unsupported": 0.50, "incorrect": 0.50, "misleading": 0.50}
-        best_coverage = 0.0
-
-        margin_grid = [0.0, 0.05, 0.10, 0.15, 0.20]
-        threshold_grid = np.linspace(0.40, 0.85, 10)
-
-        # Optimize per class independently then find suitable margin
-        class_thresholds = {}
-        for c_idx, c_name in enumerate(CLASSES):
-            tgt_prec = target_precisions.get(c_name, 0.90)
-            c_mask = (preds == c_idx)
-            if not np.any(c_mask):
-                class_thresholds[c_name] = 0.50
-                continue
-
-            c_targets = (cal_targets[c_mask] == c_idx)
-            c_p1 = p1[c_mask]
-
-            found_thresh = 0.50
-            found_prec = 0.0
-            found_cov = 0.0
-
-            for th in threshold_grid:
-                accepted = c_p1 >= th
-                if np.sum(accepted) == 0:
-                    continue
-                prec = np.mean(c_targets[accepted].astype(float))
-                cov = np.sum(accepted) / len(c_p1)
-                if prec >= tgt_prec:
-                    found_thresh = th
-                    found_prec = prec
-                    found_cov = cov
-                    break
-                elif prec > found_prec:
-                    found_thresh = th
-                    found_prec = prec
-                    found_cov = cov
-
-            class_thresholds[c_name] = round(float(found_thresh), 3)
-
-        # Now select minimum margin that optimizes overall accepted precision and coverage
-        for m in margin_grid:
-            accepted_mask = np.zeros(len(cal_probs), dtype=bool)
-            for i in range(len(cal_probs)):
-                cls = ID2LABEL[preds[i]]
-                if p1[i] >= class_thresholds[cls] and margins[i] >= m:
-                    accepted_mask[i] = True
-
-            cov = np.mean(accepted_mask.astype(float))
-            if cov > 0:
-                acc_preds = preds[accepted_mask]
-                acc_targets = cal_targets[accepted_mask]
-                acc = np.mean(acc_preds == acc_targets)
-                if cov > best_coverage and acc >= 0.85:
-                    best_coverage = cov
-                    best_margin = m
-
-        return class_thresholds, best_margin
-
-
 def main():
     parser = argparse.ArgumentParser(description="Evaluate and calibrate 4-way claim classifier.")
     parser.add_argument("--model-dir", type=str, default="models/classifier-mmbert-small-4way")
@@ -321,6 +244,10 @@ def main():
     parser.add_argument("--cal-data", type=str, default="data/calibration.jsonl")
     parser.add_argument("--fixtures-claims", type=str, default="test/fixtures/legal-claims.json")
     parser.add_argument("--fixtures-sources", type=str, default="test/fixtures/legal-sources")
+    parser.add_argument("--minimum-calibration-accepted", type=int, default=30,
+                        help="Minimum accepted calibration predictions required to enable a class.")
+    parser.add_argument("--no-wilson-lower-bound", action="store_true",
+                        help="Use empirical precision only. The default also requires the 95%% Wilson lower bound.")
     args = parser.parse_args()
 
     model_dir = Path(args.model_dir)
@@ -357,9 +284,22 @@ def main():
         "unsupported": 0.90,
         "misleading": 0.90
     }
-    thresholds, min_margin = evaluator.select_thresholds(cal_probs, cal_targets, target_precisions)
+    selection = select_fail_closed_thresholds(
+        cal_probs,
+        cal_targets,
+        CLASSES,
+        target_precisions,
+        minimum_accepted=args.minimum_calibration_accepted,
+        use_wilson_lower_bound=not args.no_wilson_lower_bound,
+    )
+    thresholds = selection["thresholds"]
+    min_margin = selection["minimum_margin"]
     print(f"Selected Thresholds: {thresholds}")
     print(f"Selected Minimum Margin: {min_margin:.2f}")
+    for class_name, metrics in selection["class_metrics"].items():
+        state = "enabled" if metrics["enabled"] else f"DISABLED ({metrics['failure_reason']})"
+        print(f"  {class_name.upper():<12} {state}; n={metrics['accepted']}, "
+              f"precision={metrics['empirical_precision']}, Wilson lower={metrics['wilson_lower_bound']}")
 
     calibration_config = {
         "temperature": round(opt_temp, 4),
@@ -369,7 +309,8 @@ def main():
         "ece_after": round(ece_after, 4),
         "brier_before": round(brier_before, 4),
         "brier_after": round(brier_after, 4),
-        "target_precisions": target_precisions
+        "target_precisions": target_precisions,
+        "selection": selection,
     }
     with open(model_dir / "calibration.json", "w", encoding="utf-8") as f:
         json.dump(calibration_config, f, indent=2, ensure_ascii=False)
@@ -390,7 +331,11 @@ def main():
     test_preds = np.argmax(test_probs, axis=1).tolist()
 
     overall_metrics = compute_metrics(test_preds, test_targets)
+    held_out_selective_metrics = selective_metrics(test_probs, np.array(test_targets), CLASSES, thresholds, min_margin)
     print(f"Test Accuracy: {overall_metrics['accuracy']*100:.2f}% | Macro F1: {overall_metrics['macro_f1']*100:.2f}%")
+    print(f"Held-out selective policy: accepted={held_out_selective_metrics['accepted']}/{held_out_selective_metrics['total']} "
+          f"({held_out_selective_metrics['coverage']*100:.1f}% coverage), "
+          f"precision={held_out_selective_metrics['precision_on_accepted']}")
     print("Per-class performance:")
     for lbl, res in overall_metrics["per_class"].items():
         print(f"  {lbl.upper():<12} P: {res['precision']*100:.1f}% | R: {res['recall']*100:.1f}% | F1: {res['f1']*100:.1f}% (N={res['support']})")
@@ -597,6 +542,7 @@ def main():
     # Save full evaluation report
     report = {
         "overall_test_metrics": overall_metrics,
+        "held_out_selective_metrics": held_out_selective_metrics,
         "token_length_breakdown": bucket_results,
         "source_type_breakdown": type_results,
         "calibration": calibration_config,

@@ -1,4 +1,6 @@
+import os
 import unittest
+from pathlib import Path
 
 try:
     from backend.semantic import check_assessable, evaluate_semantic
@@ -128,7 +130,7 @@ class TestSemanticBackend(unittest.TestCase):
             self.assertIn("swedish_label", body)
             self.assertIn("reason", body)
             self.assertIn("comparisons", body)
-            self.assertEqual(body["model_version"], "kb-bert-4way-v1")
+            self.assertEqual(body["model_version"], Path(os.environ.get("MODEL_DIR", "models/classifier-kb-bert-4way")).name)
 
             # Nonsensical claim
             resp = client.post("/api/match", json={

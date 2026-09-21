@@ -76,7 +76,7 @@ class ClaimClassifier:
         }
         self.min_margin = 0.00
         self.model_name = "KB/bert-base-swedish-cased-int8"
-        self.model_version = "kb-bert-4way-v1"
+        self.model_version = self.model_dir.name
         self.max_length = 512
 
     def load(self):
@@ -108,6 +108,38 @@ class ClaimClassifier:
                         self.thresholds.update(cal_data["thresholds"])
             except Exception as e:
                 logger.warning(f"Could not load calibration config: {e}")
+
+    def raw_logits(self, claim: str, sources: list[dict]) -> tuple[str, int, Optional[np.ndarray]]:
+        """Windows the sources, tokenizes the pair and runs the ONNX session.
+
+        Returns the premise, the token length and the raw logits. The logits
+        are None when the pair exceeds the model's context. Calibration runs
+        this same path, so serving and calibration cannot drift apart.
+        """
+        self.load()
+        windowed_premise = window_premise(
+            claim=claim,
+            sources=sources,
+            max_premise_tokens=380,
+            tokenizer=self.tokenizer
+        )
+        enc = self.tokenizer(
+            windowed_premise,
+            claim,
+            max_length=self.max_length,
+            truncation=True,
+            return_tensors="np"
+        )
+        token_length = int(enc["input_ids"].shape[1])
+        if token_length > self.max_length:
+            return windowed_premise, token_length, None
+        ort_inputs = {
+            "input_ids": enc["input_ids"].astype(np.int64),
+            "attention_mask": enc["attention_mask"].astype(np.int64)
+        }
+        if "token_type_ids" in enc:
+            ort_inputs["token_type_ids"] = enc["token_type_ids"].astype(np.int64)
+        return windowed_premise, token_length, self.session.run(None, ort_inputs)[0][0]
 
     def predict_claim(
         self,
@@ -187,27 +219,10 @@ class ClaimClassifier:
                 }
 
         self.load()
-
-        # 2. BM25 paragraph windowing
-        windowed_premise = window_premise(
-            claim=claim,
-            sources=norm_sources,
-            max_premise_tokens=380,
-            tokenizer=self.tokenizer
-        )
-
-        # 3. Tokenize
-        enc = self.tokenizer(
-            windowed_premise,
-            claim,
-            max_length=self.max_length,
-            truncation=True,
-            return_tensors="np"
-        )
-        token_length = int(enc["input_ids"].shape[1])
+        windowed_premise, token_length, raw_logits = self.raw_logits(claim, norm_sources)
 
         # Token guard
-        if token_length > self.max_length:
+        if raw_logits is None:
             return {
                 "label": "abstain",
                 "status": "abstain",
@@ -226,16 +241,6 @@ class ClaimClassifier:
                 "model": self.model_name,
                 "model_version": self.model_version
             }
-
-        ort_inputs = {
-            "input_ids": enc["input_ids"].astype(np.int64),
-            "attention_mask": enc["attention_mask"].astype(np.int64)
-        }
-        if "token_type_ids" in enc:
-            ort_inputs["token_type_ids"] = enc["token_type_ids"].astype(np.int64)
-
-        # 4. ONNX inference
-        raw_logits = self.session.run(None, ort_inputs)[0][0]
 
         # 5. Temperature scaling & Softmax
         scaled_logits = raw_logits / max(self.temperature, 1e-4)
@@ -258,7 +263,9 @@ class ClaimClassifier:
         is_low_margin = margin < self.min_margin
 
         abstain_reason = None
-        if is_low_conf:
+        if threshold > 1.0:
+            abstain_reason = "class_disabled"
+        elif is_low_conf:
             abstain_reason = "low_confidence"
         elif is_low_margin:
             abstain_reason = "low_margin"
@@ -273,6 +280,8 @@ class ClaimClassifier:
             swedish_label = "Kunde inte bedömas"
             if abstain_reason == "partial_sources":
                 reason = "Källan gav inget stöd, men alla åberopade källor kunde inte avgränsas fullt ut."
+            elif abstain_reason == "class_disabled":
+                reason = "Modellen är inte tillräckligt tillförlitlig för denna typ av bedömning."
             else:
                 reason = "Modellens säkerhet är under tröskelvärdet för säker klassificering."
         else:

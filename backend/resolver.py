@@ -64,6 +64,51 @@ def format_premise(sources: list[dict]) -> str:
         blocks.append(f"[Källa {i}: {cit}]\n{text}")
     return "\n\n".join(blocks)
 
+LOWER_COURT_START = re.compile(
+    r"^\s*(?:HovR|Hovrätten|TR|Tingsrätten|Kammarrätten|Förvaltningsrätten|Länsrätten|Svea|Göta|"
+    r"Hovrätten (?:för|över)|Skatterättsnämnden|Inskrivningsmyndigheten)\b",
+    re.IGNORECASE,
+)
+DISSENT_START = re.compile(r"skiljaktig", re.IGNORECASE)
+
+
+def deciding_dom_nodes(roots: Any) -> list:
+    """Return the deciding court's own dom node(s) among the instans children.
+
+    A betänkande is never evidence. When several dom nodes remain, drop those
+    that open with a lower court's name, and keep the last one: the deciding
+    court's decision closes a referat.
+    """
+    dom_nodes = []
+
+    def collect(node):
+        if isinstance(node, dict):
+            if node.get("type") == "dom":
+                dom_nodes.append(node)
+            elif node.get("type") not in ("instans", "betankande"):
+                for child in node.get("children", []):
+                    collect(child)
+        elif isinstance(node, list):
+            for item in node:
+                collect(item)
+
+    collect(roots)
+    if not dom_nodes:
+        return [n for n in (roots if isinstance(roots, list) else [roots])
+                if not (isinstance(n, dict) and n.get("type") == "betankande")]
+    own = [n for n in dom_nodes if not LOWER_COURT_START.match(extract_node_text(n)[:120])]
+    return [own[-1]] if own else [dom_nodes[-1]]
+
+
+def cut_dissent(text: str) -> str:
+    """Drop a dissenting opinion and everything after it."""
+    paragraphs = text.split("\n\n")
+    for index, paragraph in enumerate(paragraphs):
+        if index > 0 and DISSENT_START.search(paragraph[:150]):
+            return "\n\n".join(paragraphs[:index]).strip()
+    return text
+
+
 def extract_node_text(node: Any) -> str:
     """Extracts raw plain text recursively from an AST node or text list."""
     if isinstance(node, str):
@@ -500,6 +545,10 @@ class CitedUnitResolver:
 
         # If structure is flat or has no instans (e.g. HFD reports), use structure directly
         search_roots = deciding_instans.get("children", []) if deciding_instans else structure
+        # Older referats store the hovrätt decision as a dom node inside the
+        # deciding court's instans, and a betänkande carries its own numbered
+        # paragraphs. Only the deciding court's own dom node is evidence.
+        search_roots = deciding_dom_nodes(search_roots)
 
         # Case 1: Pinpointed paragraph(s)
         if pinpoints:
@@ -557,7 +606,7 @@ class CitedUnitResolver:
         if domslut_nodes:
             all_text.append(extract_node_text(domslut_nodes))
 
-        text = "\n\n".join(filter(None, all_text)).strip()
+        text = cut_dissent("\n\n".join(filter(None, all_text)).strip())
         return {
             "status": "ok" if text else "abstain",
             "abstain_reason": None if text else "empty_unit",

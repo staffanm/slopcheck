@@ -20,9 +20,9 @@ services:
     container_name: slopcheck-backend
     restart: unless-stopped
     environment:
-      - MODEL_DIR=/app/models/classifier-kb-bert-4way
+      - MODEL_DIR=/app/models/classifier-kb-bert-4way-v2
       - NUM_THREADS=3
     volumes:
-      - ./models/classifier-kb-bert-4way:/app/models/classifier-kb-bert-4way:ro
+      - ./models/classifier-kb-bert-4way-v2:/app/models/classifier-kb-bert-4way-v2:ro
     ports:
       - "127.0.0.1:8098:8000"

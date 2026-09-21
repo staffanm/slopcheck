@@ -9,6 +9,7 @@ import argparse
 import json
 import math
 import os
+import random
 import subprocess
 import sys
 import time
@@ -31,9 +32,32 @@ LABEL2ID = {
 ID2LABEL = {v: k for k, v in LABEL2ID.items()}
 
 
+UNIT_TYPE_NAMES = {
+    "statute_provision": "lagrum",
+    "statute_stycke": "lagrum",
+    "prop_page": "proposition",
+    "case_judgment": "rättsfall",
+    "case_pinpoint": "rättsfall",
+    "cjeu_assessment": "EU-dom",
+    "cjeu_pinpoint": "EU-dom",
+}
+
+
+def header_variants(sources: list[dict]) -> list[list[dict]]:
+    """Three header forms the server can receive: the citation as written, the
+    unit type only, and the generic fallback the client sends when it has no
+    citation. Training on all three stops the header string from carrying label
+    information."""
+    as_written = sources
+    by_type = [dict(s, citation=UNIT_TYPE_NAMES.get(s.get("unit_type", ""), "källa")) for s in sources]
+    generic = [dict(s, citation=f"Källa {i + 1}") for i, s in enumerate(sources)]
+    return [as_written, by_type, generic]
+
+
 class WindowedLegalDataset(Dataset):
-    def __init__(self, data_path: Path | str, tokenizer: Any, max_premise_tokens: int = 380):
+    def __init__(self, data_path: Path | str, tokenizer: Any, max_premise_tokens: int = 380, augment_headers: bool = False):
         self.examples = []
+        self.augment_headers = augment_headers
         with open(data_path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
@@ -42,9 +66,10 @@ class WindowedLegalDataset(Dataset):
                 row = json.loads(line)
                 sources = row.get("sources") or ([row["source"]] if "source" in row else [])
                 claim = row["claim"]
-                premise = window_premise(claim, sources, max_premise_tokens=max_premise_tokens, tokenizer=tokenizer)
+                variants = header_variants(sources) if augment_headers else [sources]
+                premises = [window_premise(claim, v, max_premise_tokens=max_premise_tokens, tokenizer=tokenizer) for v in variants]
                 self.examples.append({
-                    "premise": premise,
+                    "premises": premises,
                     "hypothesis": claim,
                     "label": LABEL2ID[row["label"]],
                     "id": row.get("id", "")
@@ -54,7 +79,9 @@ class WindowedLegalDataset(Dataset):
         return len(self.examples)
 
     def __getitem__(self, idx):
-        return self.examples[idx]
+        example = self.examples[idx]
+        premise = random.choice(example["premises"]) if self.augment_headers else example["premises"][0]
+        return {"premise": premise, "hypothesis": example["hypothesis"], "label": example["label"], "id": example["id"]}
 
 
 class CollateFn:
@@ -131,7 +158,7 @@ def evaluate(model, dataloader, device, loss_fct=None):
                 token_type_ids = token_type_ids.to(device)
             labels = batch["labels"].to(device)
 
-            with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
+            with torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=device.type == "cuda"):
                 outputs = model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)
                 logits = outputs.logits
                 loss = loss_fct(logits, labels) if loss_fct is not None else torch.tensor(0.0)
@@ -159,9 +186,12 @@ def main():
     parser.add_argument("--weight-decay", type=float, default=0.01)
     parser.add_argument("--warmup-ratio", type=float, default=0.06)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--no-header-augmentation", action="store_true",
+                        help="Train only on the citation header, not also on unit-type and generic headers.")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
+    random.seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     if device.type == "cuda":
@@ -183,7 +213,7 @@ def main():
     model.to(device)
 
     print("Preparing datasets with BM25 paragraph windowing...")
-    train_dataset = WindowedLegalDataset(args.train_data, tokenizer=tokenizer, max_premise_tokens=380)
+    train_dataset = WindowedLegalDataset(args.train_data, tokenizer=tokenizer, max_premise_tokens=380, augment_headers=not args.no_header_augmentation)
     val_dataset = WindowedLegalDataset(args.val_data, tokenizer=tokenizer, max_premise_tokens=380)
     print(f"Loaded {len(train_dataset)} train rows and {len(val_dataset)} validation rows.")
 
@@ -191,15 +221,18 @@ def main():
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn, num_workers=0)
 
-    total_steps = (len(train_loader) // args.grad_accum) * args.epochs
+    total_steps = math.ceil(len(train_loader) / args.grad_accum) * args.epochs
     warmup_steps = int(total_steps * args.warmup_ratio)
 
     effective_batch = args.batch_size * args.grad_accum
     print(f"Batch size: {args.batch_size}, Grad accum: {args.grad_accum} (Effective batch: {effective_batch})")
     print(f"Total optimization steps: {total_steps}, Warmup steps: {warmup_steps}")
 
-    # Inverse-frequency class weights
-    class_weights = torch.tensor([1.0, 2.0, 2.0, 2.0], device=device, dtype=torch.float32)
+    # Inverse-frequency class weights, scaled so the largest class has weight 1
+    label_counts = Counter(example["label"] for example in train_dataset.examples)
+    weights = [max(label_counts.values()) / max(label_counts.get(i, 1), 1) for i in range(4)]
+    print("Class weights:", {ID2LABEL[i]: round(w, 3) for i, w in enumerate(weights)})
+    class_weights = torch.tensor(weights, device=device, dtype=torch.float32)
     loss_fct = torch.nn.CrossEntropyLoss(weight=class_weights)
 
     head_params = [p for n, p in model.named_parameters() if "classifier" in n and p.requires_grad]
@@ -229,7 +262,7 @@ def main():
                 token_type_ids = token_type_ids.to(device)
             labels = batch["labels"].to(device)
 
-            with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
+            with torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=device.type == "cuda"):
                 outputs = model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)
                 loss = loss_fct(outputs.logits, labels) / args.grad_accum
 
@@ -272,6 +305,10 @@ def main():
 
             metadata = {
                 "base_model": args.model_name,
+                "git_commit": subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip(),
+                "train_rows": len(train_dataset),
+                "train_label_counts": {ID2LABEL[i]: label_counts.get(i, 0) for i in range(4)},
+                "header_augmentation": not args.no_header_augmentation,
                 "best_epoch": epoch,
                 "best_macro_f1": best_macro_f1,
                 "val_accuracy": val_metrics["accuracy"],

@@ -5,6 +5,9 @@ import cases from './fixtures/legal-claims.json' with { type: 'json' };
 import { claimContext, selectEvidence, plainText } from '../src/analysis.js';
 import { semanticClaim, semanticResult } from '../src/semantic.js';
 
+// The policy tests pin the provisional thresholds; the shipped manifest may disable labels.
+const PROVISIONAL = { supported: 0.97, contradiction: 0.97, neutral: 0.90, conflict: 0.50 };
+
 const KINDS = ['correct', 'misleading', 'incorrect', 'nonsensical', 'missing'];
 
 function input(item) {
@@ -50,9 +53,9 @@ test('identical lower-court text cannot support a claim attributed to HD', () =>
   assert.doesNotMatch(evidence.passages[0].text, /Avtalet är giltigt/);
   assert.equal(selectEvidence(claim.text, cases[1].uri, claim).passages.length, 0);
   const yes = { scores: { entailment: .99, neutral: .005, contradiction: .005 } };
-  assert.equal(semanticResult([{ ...yes, role: 'reasoning' }], evidence).status, 'abstain');
-  assert.equal(semanticResult([{ ...yes, role: 'decision' }], evidence).status, 'correct');
-  assert.equal(semanticResult([{ ...yes, role: 'summary' }], evidence).status, 'correct');
+  assert.equal(semanticResult([{ ...yes, role: 'reasoning' }], { ...evidence, thresholds: PROVISIONAL }).status, 'abstain');
+  assert.equal(semanticResult([{ ...yes, role: 'decision' }], { ...evidence, thresholds: PROVISIONAL }).status, 'correct');
+  assert.equal(semanticResult([{ ...yes, role: 'summary' }], { ...evidence, thresholds: PROVISIONAL }).status, 'correct');
 });
 
 test('source passages preserve long sentences instead of cutting off their conditions', () => {

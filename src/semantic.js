@@ -1,6 +1,10 @@
 import { citationOnly, extractionText, sentenceSegments } from './analysis.js';
 
-export const MODEL_VERSION = 'scandi-nli-small-5c7d1ee-q8-v1';
+import manifest from './model-manifest.json' with { type: 'json' };
+
+// The version names the asset directory under public/models and the cache. It
+// comes from the manifest so that the two cannot disagree.
+export const MODEL_VERSION = manifest.version;
 export const SEMANTIC = {
   correct: ['Stöd hittat', 'Källavsnittet tycks stödja påståendet. Granska villkor och sammanhang.'],
   supported: ['Stöd hittat', 'Källavsnittet tycks stödja påståendet. Granska villkor och sammanhang.'],
@@ -13,8 +17,16 @@ export const SEMANTIC = {
   pending: ['Väntar på jämförelse', ''],
 };
 
-// Provisional precision-first thresholds. See docs/semantic-evaluation.md.
-export const THRESHOLDS = { supported: 0.97, contradiction: 0.97, neutral: 0.90, conflict: 0.50 };
+// Thresholds come from the manifest when the export was calibrated
+// (scripts/evaluate_browser_model.py --calibrate); a value above 1 disables that
+// label. The fallback values are the provisional ones set for the original
+// ScandiNLI weights, see docs/semantic-evaluation.md.
+export const THRESHOLDS = {
+  supported: manifest.thresholds?.supported ?? 0.97,
+  contradiction: manifest.thresholds?.contradiction ?? 0.97,
+  neutral: manifest.thresholds?.neutral ?? 0.90,
+  conflict: 0.50,
+};
 
 // Work from locations, not string replacement: the same citation may appear in
 // several clauses, and a short parser span ("4") must never replace a date.
@@ -129,29 +141,29 @@ export function scoresFromLogits(logits) {
   return Object.fromEntries(['entailment', 'neutral', 'contradiction'].map((label, index) => [label, exps[index] / total]));
 }
 
-export function semanticResult(comparisons, { incomplete = false, requireConclusion = false, reason: empty, exact = false } = {}) {
+export function semanticResult(comparisons, { incomplete = false, requireConclusion = false, reason: empty, exact = false, thresholds = THRESHOLDS } = {}) {
   if (!comparisons.length) return { status: 'abstain', reason: empty ?? 'Inga källavsnitt ryms i modellens textgräns.', comparisons };
   const best = label => comparisons.reduce((a, b) => a.scores[label] >= b.scores[label] ? a : b);
   const support = best('entailment');
   const conflict = best('contradiction');
-  const strongSupport = support.scores.entailment >= THRESHOLDS.supported;
-  const strongConflict = conflict.scores.contradiction >= THRESHOLDS.contradiction;
+  const strongSupport = support.scores.entailment >= thresholds.supported;
+  const strongConflict = conflict.scores.contradiction >= thresholds.contradiction;
   let status = 'abstain';
   let evidence = support;
   let reason = SEMANTIC.abstain[1];
   if (incomplete) reason = 'Alla utvalda avsnitt kunde inte jämföras. Texten är för lång.';
   // A strong signal stands only when no other passage mostly says the opposite.
-  else if ((strongSupport && conflict.scores.contradiction >= THRESHOLDS.conflict) || (strongConflict && support.scores.entailment >= THRESHOLDS.conflict)) {
+  else if ((strongSupport && conflict.scores.contradiction >= thresholds.conflict) || (strongConflict && support.scores.entailment >= thresholds.conflict)) {
     reason = 'Källavsnitten ger motstridiga signaler. Det går inte att avgöra om ett villkor saknas eller om modellen misstolkar texten.';
   } else if (strongSupport) {
-    const conclusion = comparisons.find(item => (item.roles ?? [item.role]).some(role => ['summary', 'decision'].includes(role)) && item.scores.entailment >= THRESHOLDS.supported);
+    const conclusion = comparisons.find(item => (item.roles ?? [item.role]).some(role => ['summary', 'decision'].includes(role)) && item.scores.entailment >= thresholds.supported);
     if (requireConclusion && !conclusion) reason = 'Modellen hittar liknande text, men kan inte bekräfta påståendet i domstolens sammanfattning eller avgörande.';
     else { status = 'correct'; evidence = conclusion ?? support; }
   }
   else if (strongConflict) {
     status = 'incorrect';
     evidence = conflict;
-  } else if (comparisons.every(item => item.scores.neutral >= THRESHOLDS.neutral)) {
+  } else if (comparisons.every(item => item.scores.neutral >= thresholds.neutral)) {
     status = 'missing';
     evidence = comparisons.reduce((a, b) => a.scores.neutral >= b.scores.neutral ? a : b);
   } else if (exact && support.scores.entailment < 0.40 && conflict.scores.contradiction < 0.40 && comparisons.some(item => item.scores.neutral >= 0.60)) {

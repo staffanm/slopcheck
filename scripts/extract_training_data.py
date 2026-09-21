@@ -234,6 +234,16 @@ def extract_claim_and_citations(stycke_node: dict) -> Optional[dict]:
             nc_cit = f"”{nc['name']}” {nc_pinpoint}".strip()
             ref_sources.append({"citation": nc_cit, "target_uri": nc_uri})
 
+    # A popular name right before its NJA citation ("Smitningen" NJA 2018 s. 394 p. 9)
+    # is a label for that citation, not a second whole-judgment source.
+    linked_documents = {src["target_uri"].split("#")[0] for src in ref_sources if not src["citation"].startswith("”")}
+    ref_sources = [src for src in ref_sources
+                   if not (src["citation"].startswith("”") and "#" not in src["target_uri"] and src["target_uri"] in linked_documents)]
+
+    # ECHR citations ("Allan v. the United Kingdom, no. 48539/99, § 44") are not
+    # linked by lagen.nu's citation parser and are therefore missing here. That
+    # linking belongs in ferenda, not in this extractor.
+
     if not ref_sources:
         return None
 
