@@ -80,7 +80,7 @@ def generate_overstatement(claim: str) -> Optional[str]:
     return query_llm(prompt, temperature=0.3)
 
 
-def find_adjacent_source(source: dict, resolver: CitedUnitResolver, all_sources: list[dict]) -> Optional[dict]:
+def find_adjacent_source(source: dict, resolver: CitedUnitResolver, all_sources: list[dict], rng: random.Random) -> Optional[dict]:
     """Finds an adjacent unit (paragraph, stycke, page) or related authority."""
     s_id = source["source_id"]
     u_type = source["unit_type"]
@@ -127,7 +127,7 @@ def find_adjacent_source(source: dict, resolver: CitedUnitResolver, all_sources:
     # 4. Fallback: pick another source of same unit type from corpus
     matching_types = [s for s in all_sources if s.get("unit_type") == u_type and s.get("source_id") != s_id]
     if matching_types:
-        chosen = random.choice(matching_types)
+        chosen = rng.choice(matching_types)
         return {
             "citation": chosen["citation"],
             "source_id": chosen["source_id"],
@@ -140,10 +140,13 @@ def find_adjacent_source(source: dict, resolver: CitedUnitResolver, all_sources:
     return None
 
 
-def process_family(auth_row: dict, resolver: CitedUnitResolver, tokenizer: AutoTokenizer, all_sources: list[dict]) -> list[dict]:
+def process_family(auth_row: dict, resolver: CitedUnitResolver, tokenizer: AutoTokenizer, all_sources: list[dict], seed: int) -> list[dict]:
     """Generates a complete family of rows for an authentic pair under PRD Section 5."""
     family = []
     claim = auth_row["claim"]
+    # Per-row RNG keyed by the row id, so selections do not depend on the order
+    # threads happen to run in. This makes the generated set reproducible.
+    rng = random.Random(f"{seed}:{auth_row.get('origin_claim_id', auth_row.get('id', claim))}")
     sources = auth_row.get("sources") or ([auth_row["source"]] if "source" in auth_row else [])
     origin_claim_id = auth_row["origin_claim_id"]
     origin_doc_id = auth_row["origin_document_id"]
@@ -198,7 +201,7 @@ def process_family(auth_row: dict, resolver: CitedUnitResolver, tokenizer: AutoT
     existing_src_ids = {s["source_id"] for s in sources}
     distractor_cands = [s for s in all_sources if s["source_id"] not in existing_src_ids and s.get("document_id") != origin_doc_id]
     if distractor_cands:
-        distractor = dict(random.choice(distractor_cands))
+        distractor = dict(rng.choice(distractor_cands))
         distractor_sources = list(sources) + [distractor]
         distractor_premise = format_premise(distractor_sources)
         pair_len = len(tokenizer(distractor_premise, claim, add_special_tokens=True, truncation=False)["input_ids"])
@@ -221,7 +224,7 @@ def process_family(auth_row: dict, resolver: CitedUnitResolver, tokenizer: AutoT
     neg_sources = []
     neg_types = []
     for s in sources:
-        neg_s = find_adjacent_source(s, resolver, all_sources)
+        neg_s = find_adjacent_source(s, resolver, all_sources, rng)
         if neg_s:
             neg_type = neg_s.pop("negative_type", "adjacent")
             neg_types.append(neg_type)
@@ -295,7 +298,10 @@ def main():
     parser.add_argument("--output", type=str, default="data/all_generated_pairs.jsonl")
     parser.add_argument("--workers", type=int, default=4, help="Number of concurrent worker threads")
     parser.add_argument("--limit", type=int, default=None, help="Limit number of authentic pairs to process")
+    parser.add_argument("--seed", type=int, default=42, help="Seed for reproducible source selection")
     args = parser.parse_args()
+
+    random.seed(args.seed)
 
     input_file = Path(args.input)
     output_file = Path(args.output)
@@ -320,7 +326,7 @@ def main():
     print(f"Starting counterfactual generation across {args.workers} workers...")
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
         future_to_row = {
-            executor.submit(process_family, row, resolver, tokenizer, all_sources): row
+            executor.submit(process_family, row, resolver, tokenizer, all_sources, args.seed): row
             for row in auth_rows
         }
 
@@ -338,6 +344,9 @@ def main():
                 rps = completed / elapsed
                 remaining = (total - completed) / rps if rps > 0 else 0
                 print(f"[{completed}/{total}] Generated {len(all_rows)} total rows ({completed/total*100:.1f}%) - {remaining:.0f}s remaining...")
+
+    # Sort by id so the file is byte-stable regardless of thread completion order.
+    all_rows.sort(key=lambda r: (r.get("id", ""), r.get("transformation", "")))
 
     # Write output JSONL
     print(f"\nWriting {len(all_rows)} total rows to {output_file}...")
