@@ -15,7 +15,7 @@ export function semanticClient(onProgress) {
       worker = new Worker(new URL('./semantic.worker.js', import.meta.url), { type: 'module' });
       worker.onmessage = ({ data }) => {
         if (data.id !== job?.id) return;
-        if (data.progress && typeof onProgress === 'function') return onProgress(data.progress);
+        if (data.progress && typeof onProgress === 'function') return onProgress(data.progress, data.fraction);
         if (data.error) job.reject(new Error(data.error));
         else job.resolve(data.result);
       };

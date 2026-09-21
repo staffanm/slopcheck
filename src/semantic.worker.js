@@ -14,7 +14,25 @@ let session;
 let backend;
 let modelBytes;
 
-async function asset(base, name) {
+// Stream a download so the UI can show a real progress bar for the model file.
+async function readWithProgress(response, total, onBytes) {
+  const reader = response.body.getReader();
+  const chunks = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    onBytes(received, total || received);
+  }
+  const merged = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) { merged.set(chunk, offset); offset += chunk.length; }
+  return merged.buffer;
+}
+
+async function asset(base, name, onBytes) {
   if (!Object.hasOwn(manifest.files, name)) throw new Error('Okänd modellfil.');
   const url = new URL(`models/${MODEL_VERSION}/${name}`, base);
   if (url.origin !== self.location.origin) throw new Error('Modellfiler måste komma från samma webbplats.');
@@ -22,11 +40,14 @@ async function asset(base, name) {
   try { cache = await globalThis.caches?.open(`slopcheck-model-${MODEL_VERSION}`); }
   catch (error) { if (!(error instanceof DOMException)) throw error; } // Private mode can prohibit asset storage.
   let response = await cache?.match(url);
-  if (!response) {
+  let bytes;
+  if (response) {
+    bytes = await response.arrayBuffer();
+  } else {
     response = await fetch(url, { credentials: 'omit', referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(120000) });
     if (!response.ok) throw new Error(`Modellfilen kunde inte hämtas (${response.status}).`);
+    bytes = onBytes && response.body ? await readWithProgress(response, manifest.files[name].bytes, onBytes) : await response.arrayBuffer();
   }
-  const bytes = await response.arrayBuffer();
   const digest = await sha256Hex(bytes);
   if (bytes.byteLength !== manifest.files[name].bytes || digest !== manifest.files[name].sha256) {
     await cache?.delete(url);
@@ -39,8 +60,9 @@ async function asset(base, name) {
 
 async function start(base, id) {
   if (session) return;
-  self.postMessage({ id, progress: 'Hämtar lokal språkmodell · 25 MB + körmiljö första gången…' });
-  const files = await Promise.all(['tokenizer.json', 'tokenizer_config.json', 'model.onnx'].map(name => asset(base, name)));
+  self.postMessage({ id, progress: 'Hämtar lokal språkmodell · 25 MB + körmiljö första gången…', fraction: null });
+  const onModelBytes = (received, total) => self.postMessage({ id, progress: `Hämtar lokal språkmodell · ${Math.round(received / total * 100)} %`, fraction: received / total });
+  const files = await Promise.all(['tokenizer.json', 'tokenizer_config.json', 'model.onnx'].map(name => asset(base, name, name === 'model.onnx' ? onModelBytes : null)));
   tokenizer = new Tokenizer(...files.slice(0, 2).map(bytes => JSON.parse(new TextDecoder().decode(bytes))));
   modelBytes = files[2];
   if (self.navigator.gpu) {

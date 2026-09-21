@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Så fungerar slopcheck: stegen i normalläge och integritetsläge, och vad som skickas från din webbläsare." />
+    <meta name="referrer" content="no-referrer" />
+    <title>Så funkar det — slopcheck</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="slopcheck, startsida"><span class="brand-mark" aria-hidden="true">s<span>✓</span></span>slopcheck<span class="beta">BETA</span></a>
+      <nav aria-label="Huvudmeny"><a href="./" aria-current="page">Tillbaka till kontrollen</a><a href="./ansvarsfriskrivning.html">Ansvarsfriskrivning</a><a href="https://lagen.nu" target="_blank" rel="noopener noreferrer">Källor från <strong>lagen.nu</strong> <span aria-hidden="true">↗</span></a></nav>
+    </header>
+    <main class="page">
+      <h1>Så funkar det</h1>
+      <p class="lead">slopcheck läser ditt dokument, hittar juridiska hänvisningar, kontrollerar att källorna finns och jämför dina påståenden med källtexten. Du väljer mellan två lägen. De skiljer sig i vad som lämnar din enhet och var jämförelsen körs.</p>
+
+      <h2>Stegen</h2>
+      <ol class="steps">
+        <li><strong>Läsa filen.</strong> PDF och Word läses i din webbläsare. Texten visas i textfältet. Filen lämnar aldrig din enhet.</li>
+        <li><strong>Hitta hänvisningar.</strong> Texten delas upp i hänvisningar (lagrum och rättsfall).</li>
+        <li><strong>Kontrollera källorna.</strong> Varje hänvisning slås upp mot lagen.nu. En hänvisning som inte finns markeras som ogiltig.</li>
+        <li><strong>Välja källavsnitt.</strong> De mest relevanta styckena i källan väljs ut för jämförelsen.</li>
+        <li><strong>Jämföra påståendet.</strong> En språkmodell bedömer om källavsnittet stöder, motsäger eller inte täcker påståendet.</li>
+      </ol>
+
+      <h2>Normalläge</h2>
+      <p>Normalläge är standard. Det ger den mest kapabla jämförelsen, eftersom modellen körs på servern.</p>
+      <table class="flow">
+        <thead><tr><th>Steg</th><th>Var det körs</th><th>Vad som lämnar din webbläsare</th></tr></thead>
+        <tbody>
+          <tr><td>Läsa filen</td><td>Din enhet</td><td>Ingenting</td></tr>
+          <tr><td>Hitta hänvisningar</td><td>lagen.nu</td><td>Dokumentets text skickas till lagen.nu för att hitta hänvisningar</td></tr>
+          <tr><td>Kontrollera källorna</td><td>lagen.nu</td><td>Varje hänvisnings beteckning</td></tr>
+          <tr><td>Välja källavsnitt</td><td>Din enhet</td><td>Ingenting (källtexten hämtas från lagen.nu)</td></tr>
+          <tr><td>Jämföra påståendet</td><td>slopchecks server</td><td>Påståendet och de utvalda källavsnitten skickas till servern</td></tr>
+        </tbody>
+      </table>
+      <p class="note">Texten som skickas till lagen.nu behandlas tillfälligt i minnet, sparas inte och skickas inte vidare. Påståendet och källavsnitten som skickas till slopchecks server används endast för att räkna fram bedömningen. De sparas inte.</p>
+
+      <h2>Integritetsläge</h2>
+      <p>Kryssa i <strong>Integritetsläge</strong> för att hålla dokumentet och dina hänvisningar på din enhet. Ingen text skickas till lagen.nu eller till slopchecks server. Jämförelsen körs av en mindre språkmodell i din webbläsare.</p>
+      <table class="flow">
+        <thead><tr><th>Steg</th><th>Var det körs</th><th>Vad som lämnar din webbläsare</th></tr></thead>
+        <tbody>
+          <tr><td>Läsa filen</td><td>Din enhet</td><td>Ingenting</td></tr>
+          <tr><td>Hitta hänvisningar</td><td>Din enhet</td><td>Ingenting (LagrumParser körs lokalt)</td></tr>
+          <tr><td>Kontrollera källorna</td><td>Din enhet + lagen.nu</td><td>Endast ett kort prefix av varje hänvisning, blandat med lockbeten (<em>k</em>-anonymitet). Servern kan inte se vilken hänvisning du slog upp</td></tr>
+          <tr><td>Välja källavsnitt</td><td>Din enhet</td><td>Ingenting (källor hämtas i volympaket)</td></tr>
+          <tr><td>Jämföra påståendet</td><td>Din enhet</td><td>Ingenting (den lokala modellen körs i webbläsaren)</td></tr>
+        </tbody>
+      </table>
+      <p class="note">Integritetsläget hämtar cirka 25 MB modellfiler och körmiljön första gången. Filerna hämtas från denna webbplats och sparas i webbläsarens cache för återanvändning. Den lokala modellen är mindre än serverns och bedömer färre påståenden.</p>
+
+      <h2>Vad resultaten betyder</h2>
+      <ul class="meanings">
+        <li><span class="badge cite found">Hittad källa</span> Hänvisningen finns i lagen.nu.</li>
+        <li><span class="badge cite invalid">Ogiltig hänvisning</span> lagen.nu hittar ingen källa med den beteckningen.</li>
+        <li><span class="badge sem correct">Stöd hittat</span> Källavsnittet tycks stödja påståendet.</li>
+        <li><span class="badge sem missing">Stöd saknas</span> De utvalda avsnitten gav inget tydligt stöd. Det bevisar inte att påståendet är fel.</li>
+        <li><span class="badge sem incorrect">Möjlig motsägelse</span> Källavsnittet kan motsäga påståendet.</li>
+        <li><span class="badge sem misleading">Vilseledande</span> Källan ställer villkor eller gör undantag som påståendet utelämnar.</li>
+        <li><span class="badge sem abstain">Kunde inte bedömas</span> Jämförelsen ger inget tillräckligt säkert resultat.</li>
+      </ul>
+      <p class="report-limit">Resultaten är experimentella och ersätter inte din egen granskning. Läs <a href="./ansvarsfriskrivning.html">ansvarsfriskrivningen</a>.</p>
+      <p><a class="back" href="./">← Tillbaka till kontrollen</a></p>
+    </main>
+    <footer><a class="brand" href="./">slopcheck</a><p>Källkontroll med lagen.nu · Experimentell jämförelse av påståenden.</p><a href="https://lagen.nu" target="_blank" rel="noopener noreferrer">lagen.nu ↗</a></footer>
+    <script type="module" src="/src/page.js"></script>
+  </body>
+</html>

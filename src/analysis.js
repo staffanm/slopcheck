@@ -64,6 +64,57 @@ export function citationSegments(block, occurrences) {
   return segments;
 }
 
+// The extract API splits a range such as "4-6 §§ räntelagen" into several
+// occurrences. Merge consecutive occurrences of one block into one finding when
+// only connector text (no letters) separates them and they share a base source.
+export function mergeOccurrences(occurrences, blocks) {
+  const blockText = id => blocks.find(block => block.id === id)?.text ?? '';
+  const base = target => target.uri.split('#')[0];
+  const bases = occurrence => new Set((occurrence.targets ?? []).map(base));
+  const single = occurrence => occurrence.locations.length === 1 ? occurrence.locations[0] : null;
+  const merged = [];
+  for (const occurrence of occurrences) {
+    const previous = merged.at(-1);
+    const a = previous && single(previous);
+    const b = single(occurrence);
+    if (a && b && a.block_id === b.block_id && b.start >= a.end
+      && !/\p{L}/u.test(blockText(a.block_id).slice(a.end, b.start))
+      && [...bases(occurrence)].some(uri => bases(previous).has(uri))) {
+      const start = Math.min(a.start, b.start);
+      const end = Math.max(a.end, b.end);
+      previous.locations = [{ block_id: a.block_id, start, end }];
+      previous.text = blockText(a.block_id).slice(start, end);
+      const seen = new Set(previous.targets.map(target => target.uri));
+      for (const target of occurrence.targets ?? []) if (!seen.has(target.uri)) { previous.targets.push(target); seen.add(target.uri); }
+      continue;
+    }
+    merged.push({ ...occurrence, locations: [...occurrence.locations], targets: [...(occurrence.targets ?? [])] });
+  }
+  return merged;
+}
+
+// One pass over a block that marks both the claim sentence and the citation for
+// every row. Each segment lists the rows whose claim covers it and the rows
+// whose citation covers it, so a citation can carry both a claim tint and its
+// own border.
+export function claimSegments(block, rows) {
+  const spans = [];
+  rows.forEach((row, index) => {
+    for (const location of row.claim?.locations ?? []) if (location.block_id === block.id) spans.push({ index, kind: 'claim', ...location });
+    for (const location of row.occurrence.locations) if (location.block_id === block.id) spans.push({ index, kind: 'cite', ...location });
+  });
+  const points = [...new Set([0, block.text.length, ...spans.flatMap(span => [span.start, span.end])])].sort((a, b) => a - b);
+  const segments = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    const start = points[i];
+    const end = points[i + 1];
+    if (end <= start) continue;
+    const cover = kind => [...new Set(spans.filter(span => span.kind === kind && span.start <= start && span.end >= end).map(span => span.index))].sort((a, b) => a - b);
+    segments.push({ start, end, claimRows: cover('claim'), citeRows: cover('cite') });
+  }
+  return segments;
+}
+
 export function plainText(markdown) {
   return markdown.replace(/!\[[^\]]*\]\([^)]*\)/g, '')
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
@@ -340,6 +391,66 @@ export function invalidCitationMessage(target, occurrence) {
   return `Det finns ingen lag som heter ${text}.`;
 }
 
+function median(numbers) {
+  const sorted = numbers.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return 0;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+// PDF footnotes have no structure. When the page bottom holds a smaller-font,
+// numbered note block and the body holds a matching smaller-font digit marker,
+// move each note inline at its marker so its citation reads like an inline one.
+// The two matching signals are required together, so an unrelated small line
+// (a footer or a page number) never triggers a move. Returns the body lines
+// with markers replaced, or null to keep the page unchanged.
+function inlinePdfFootnotes(lines) {
+  if (lines.length < 3) return null;
+  // Body font = the height carrying the most characters, so a few small note
+  // lines never move it.
+  const chars = new Map();
+  for (const line of lines) for (const item of line.items) {
+    const height = Math.round(item.height);
+    chars.set(height, (chars.get(height) ?? 0) + item.str.trim().length);
+  }
+  const bodyFont = [...chars.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+  if (!bodyFont) return null;
+  const lineFont = line => median(line.items.map(item => item.height));
+  let start = lines.length;
+  while (start > 0 && lineFont(lines[start - 1]) <= bodyFont * 0.8) start--;
+  const region = lines.slice(start);
+  if (!region.length || region.length > lines.length * 0.55) return null;
+  const regionText = line => line.items.map(item => item.str).join(' ').replace(/\s+/g, ' ').trim();
+  if (!/^\d{1,3}\b/.test(regionText(region[0]))) return null;
+
+  const notes = new Map();
+  let current = null;
+  for (const line of region) {
+    const text = regionText(line);
+    const lead = /^(\d{1,3})[.)\]]?\s+(.*)$/.exec(text);
+    if (lead) { current = lead[1]; notes.set(current, `${notes.has(current) ? `${notes.get(current)} ` : ''}${lead[2]}`); }
+    else if (current) notes.set(current, `${notes.get(current)} ${text}`);
+  }
+  for (const [number, text] of notes) {
+    const trimmed = text.replace(/\s+/g, ' ').trim();
+    if (trimmed) notes.set(number, trimmed); else notes.delete(number);
+  }
+  if (!notes.size) return null;
+
+  const body = lines.slice(0, start);
+  let matched = 0;
+  for (const line of body) {
+    for (const item of line.items) {
+      const digit = item.str.trim();
+      if (/^\d{1,3}$/.test(digit) && item.height <= bodyFont * 0.75 && notes.has(digit)) {
+        item.str = ` (${notes.get(digit)})`;
+        matched++;
+      }
+    }
+  }
+  return matched ? body : null;
+}
+
 export function pdfPageText(items) {
   const lines = [];
   let line;
@@ -350,13 +461,14 @@ export function pdfPageText(items) {
       line = { y, height: item.height, items: [] };
       lines.push(line);
     }
-    line.items.push(item);
+    line.items.push({ str: item.str, height: item.height });
   }
-  return lines.map((line, index) => {
-    const previous = lines[index - 1];
-    const separator = !previous ? '' : Math.abs(previous.y - line.y) > Math.max(previous.height, line.height) * 1.8 ? '\n\n' : ' ';
-    return separator + line.items.map(item => item.str).join(' ').replace(/\s+/g, ' ').trim();
+  const render = source => source.map((current, index) => {
+    const previous = source[index - 1];
+    const separator = !previous ? '' : Math.abs(previous.y - current.y) > Math.max(previous.height, current.height) * 1.8 ? '\n\n' : ' ';
+    return separator + current.items.map(item => item.str).join(' ').replace(/\s+/g, ' ').trim();
   }).join('').trim();
+  return render(inlinePdfFootnotes(lines) ?? lines);
 }
 
 export function validateBlocks(blocks) {

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import pasted from './fixtures/pasted-line-wrap.json' with { type: 'json' };
-import { citationSegments, claimContext, classifyResolution, extractionText, invalidCitationMessage, normalizeQuote, occurrenceStatus, originalOccurrences, pdfPageText, provisionText, selectEvidence, validateBlocks } from '../src/analysis.js';
+import { citationSegments, claimContext, claimSegments, classifyResolution, extractionText, invalidCitationMessage, mergeOccurrences, normalizeQuote, occurrenceStatus, originalOccurrences, pdfPageText, provisionText, selectEvidence, validateBlocks } from '../src/analysis.js';
 import { extract } from '../src/api.js';
 import { extractLocal, getLocalParser } from '../src/lagrum-extract.js';
 
@@ -75,6 +75,27 @@ test('claim context includes the complete wrapped sentence after a citation', ()
 test('wrapped PDF lines keep chapter and paragraph in one citation; paragraphs remain separated', () => {
   const item = (str, y) => ({ str, transform: [1, 0, 0, 1, 60, y], height: 12 });
   assert.equal(pdfPageText([item('reglerna i 18 kap.', 700), item('7 § rättegångsbalken.', 684), item('Nästa stycke.', 650)]), 'reglerna i 18 kap. 7 § rättegångsbalken.\n\nNästa stycke.');
+});
+
+test('a PDF footnote moves inline at its marker and its citation is found in context', () => {
+  const it = (str, y, height = 12) => ({ str, transform: [1, 0, 0, 1, 60, y], height });
+  // Body text (many characters, height 12) with a small raised marker "1",
+  // and a smaller numbered note block at the page bottom.
+  const items = [
+    it('Detta följer av fast praxis i svensk rätt om ansvar.', 700),
+    it('1', 706, 7),
+    it('Nästa mening saknar hänvisning.', 684),
+    it('1', 120, 8), it('Se NJA 2013 s. 502.', 120, 8),
+  ];
+  const text = pdfPageText(items);
+  assert.match(text, /fast praxis i svensk rätt om ansvar\. \(Se NJA 2013 s\. 502\.\)/);
+  assert.doesNotMatch(text, /(^|\n)1 Se NJA/);
+});
+
+test('pdfPageText leaves a page without footnotes unchanged', () => {
+  const it = (str, y, height = 12) => ({ str, transform: [1, 0, 0, 1, 60, y], height });
+  const items = [it('Enligt 4 § avtalslagen gäller regeln.', 700), it('Sidan 1', 60, 12)];
+  assert.equal(pdfPageText(items), 'Enligt 4 § avtalslagen gäller regeln.\n\nSidan 1');
 });
 
 const markdown = '# Avtalslagen\n\n## [1 kap.](https://lagen.nu/1915:218#K1) Avtal\n\n**3 §** Ett annat lagrum.\n\n**4 §** Antagande svar, som för sent kommer anbudsgivaren till handa, skall gälla såsom nytt anbud.\n\nAndra stycket i samma paragraf.\n\n**5 §** En annan regel.';
@@ -215,3 +236,42 @@ test('claimContext does not split on abbreviations such as t.ex. and bl.a.', () 
 });
 
 
+
+test('mergeOccurrences joins a range into one finding but keeps distinct laws apart', () => {
+  const blocks = [{ id: 'text', text: 'Dröjsmålsränta utgår enligt 4-6 §§ räntelagen (1975:635) och 4 § avtalslagen.' }];
+  const t = blocks[0].text;
+  const occ = (sub, uris) => {
+    const start = t.indexOf(sub);
+    return { text: sub, locations: [{ block_id: 'text', start, end: start + sub.length }], targets: uris.map(uri => ({ uri, source: 'sfs' })) };
+  };
+  const occurrences = [
+    occ('4', ['https://lagen.nu/1975:635#P4']),
+    occ('6 §§', ['https://lagen.nu/1975:635#P6']),
+    occ('räntelagen (1975:635)', ['https://lagen.nu/1975:635']),
+    occ('4 § avtalslagen', ['https://lagen.nu/1915:218#P4']),
+  ];
+  const merged = mergeOccurrences(occurrences, blocks);
+  assert.equal(merged.length, 2);
+  assert.equal(merged[0].text, '4-6 §§ räntelagen (1975:635)');
+  assert.deepEqual(merged[0].targets.map(target => target.uri), ['https://lagen.nu/1975:635#P4', 'https://lagen.nu/1975:635#P6', 'https://lagen.nu/1975:635']);
+  assert.equal(merged[1].text, '4 § avtalslagen');
+  assert.equal(merged[0].locations.length, 1);
+});
+
+test('claimSegments tints the claim sentence and marks the citation inside it', () => {
+  const block = { id: 'text', text: 'Inledning. Enligt 4 § gäller regeln. Slut.' };
+  const citeStart = block.text.indexOf('4 §');
+  const rows = [{
+    occurrence: { locations: [{ block_id: 'text', start: citeStart, end: citeStart + 3 }] },
+    claim: { locations: [{ block_id: 'text', start: 11, end: 36 }] },
+  }];
+  const segments = claimSegments(block, rows);
+  const citation = segments.find(segment => segment.citeRows.length);
+  assert.deepEqual(citation.citeRows, [0]);
+  assert.deepEqual(citation.claimRows, [0]);
+  const claimOnly = segments.filter(segment => segment.claimRows.length && !segment.citeRows.length);
+  assert.ok(claimOnly.length >= 1);
+  const outside = segments.filter(segment => !segment.claimRows.length && !segment.citeRows.length);
+  assert.ok(outside.length >= 1);
+  assert.equal(block.text.slice(segments[0].start, segments[0].end), 'Inledning. ');
+});

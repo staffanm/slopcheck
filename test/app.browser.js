@@ -48,6 +48,22 @@ async function mockApi(page, { failResolve = false, sourceText = source } = {}) 
       });
     } else await route.fulfill({ json: { markdown: sourceText } });
   });
+  // The backend classifier (normal mode). Integritetsläge never reaches it.
+  await page.route('**/api/match', async route => {
+    const { claim } = route.request().postDataJSON();
+    const supported = /nytt anbud/i.test(claim);
+    await route.fulfill({ json: supported ? {
+      label: 'correct', status: 'correct', swedish_label: 'Stöd hittat',
+      reason: 'Källavsnittet tycks stödja påståendet.',
+      evidence: { source: sourceText, scores: {} },
+      comparisons: [{ source: sourceText, scores: { supported: 0.99, unsupported: 0.003, incorrect: 0.003, misleading: 0.004 } }],
+      model: 'kb-bert-4way', model_version: 'kb-bert-test-v1',
+    } : {
+      label: 'unsupported', status: 'missing', swedish_label: 'Stöd saknas',
+      reason: 'De jämförda avsnitten gav inget tydligt stöd.',
+      evidence: null, comparisons: [], model: 'kb-bert-4way', model_version: 'kb-bert-test-v1',
+    } });
+  });
   return requests;
 }
 
@@ -59,7 +75,7 @@ test('checks occurrences, deduplicates targets, shows source evidence, and print
   await page.getByRole('button', { name: 'Kontrollera hänvisningar' }).click();
   await expect(page.locator('#progress')).toBeHidden({ timeout: 30000 });
   await expect(page.locator('.result')).toHaveCount(3);
-  await expect(page.locator('.result > details > summary > .invalid')).toHaveCount(2);
+  await expect(page.locator('.badge.cite.invalid')).toHaveCount(2);
   await page.locator('.result').last().locator('summary').first().click();
   await page.getByText('Visa bestämmelsen', { exact: true }).click();
   await expect(page.locator('.source-item .evidence blockquote').first()).toContainText('Antagande svar');
@@ -92,7 +108,7 @@ test('network failure remains retryable and never becomes invalid', async ({ pag
   await page.getByLabel('Juridisk text').fill('Se NJA 2013 s. 372.');
   await page.getByRole('button', { name: 'Kontrollera hänvisningar' }).click();
   await expect(page.locator('#progress')).toBeHidden({ timeout: 30000 });
-  await expect(page.locator('.result > details > summary > .error')).toHaveCount(1);
+  await expect(page.locator('.badge.cite.error')).toHaveCount(1);
   await expect(page.locator('.result .invalid')).toHaveCount(0);
   await expect(page.locator('#retry')).toBeVisible();
 });
@@ -106,9 +122,11 @@ test('a DOCX is read and checked in one action, including tables and notes', asy
   await page.locator('#check').click();
   await expect(page.locator('#progress')).toBeHidden({ timeout: 30000 });
   await expect(page.locator('#document-content')).toContainText('Tabelltext');
-  await expect(page.locator('#document-content')).toContainText('Fotnot 1');
+  // The footnote citation is inlined at its marker, not shown as a separate note.
+  await expect(page.locator('#document-content')).toContainText('finns en hänvisning. (Se NJA 2013 s. 372.)');
+  await expect(page.locator('#document-content')).not.toContainText('Fotnot 1');
   await expect(page.locator('.result')).toHaveCount(3);
-  expect(requests.find(r => r.method() === 'POST').postDataJSON().blocks).toHaveLength(4);
+  expect(requests.find(r => r.method() === 'POST').postDataJSON().blocks).toHaveLength(3);
   expect(requests.filter(r => r.method() === 'POST').every(r => r.headers()['content-type'] === 'application/json')).toBe(true);
 });
 
@@ -130,10 +148,8 @@ test('corrupt files fail without sending text and allow replacement', async ({ p
   const requests = await mockApi(page);
   await page.goto('/');
   await page.locator('#file').setInputFiles({ name: 'broken.pdf', mimeType: 'application/pdf', buffer: Buffer.from('not a PDF') });
-  await page.locator('#check').click();
   await expect(page.getByRole('alert')).toContainText('Kunde inte läsa dokumentet');
   expect(requests).toHaveLength(0);
-  await page.locator('#remove-file').click();
   await expect(page.locator('#check')).toBeDisabled();
   await page.locator('#text').fill('Se NJA 2013 s. 372.');
   await expect(page.locator('#check')).toBeEnabled();
@@ -144,6 +160,7 @@ test('textarea and upload row share one file drop target', async ({ page }) => {
   await page.goto('/');
   const bytes = [...await readFile('test/fixtures/references.pdf')];
   for (const selector of ['#text', '.file-row']) {
+    if (await page.locator('#remove-file').isVisible()) await page.locator('#remove-file').click();
     await page.locator('#text').fill('Tidigare text.');
     const dataTransfer = await page.evaluateHandle(bytes => {
       const transfer = new DataTransfer();
@@ -155,8 +172,10 @@ test('textarea and upload row share one file drop target', async ({ page }) => {
     await page.locator(selector).dispatchEvent('drop', { dataTransfer });
     await expect(page.locator('#input')).not.toHaveClass(/dragging/);
     await expect(page.locator('#file-name')).toContainText('references.pdf');
-    await expect(page.locator('#text')).toHaveValue('');
+    // The received file content fills the textarea, which is then read-only.
+    await expect(page.locator('#text')).toBeDisabled();
     await expect(page.locator('#check')).toBeEnabled();
+    await expect(page.locator('#text')).not.toHaveValue('');
     expect(requests).toHaveLength(0);
     await dataTransfer.dispose();
   }
@@ -241,6 +260,7 @@ test('model download failure abstains while source evidence remains available; r
   await mockApi(page);
   await page.route('**/models/**', route => route.abort());
   await page.goto('/');
+  await page.locator('#local-mode').check();
   await page.locator('#text').fill('Enligt 4 § avtalslagen ska ett sent svar räknas som ett nytt anbud.');
   await page.locator('#check').click();
   await expect(page.locator('#progress')).toBeHidden({ timeout: 30000 });
@@ -248,7 +268,7 @@ test('model download failure abstains while source evidence remains available; r
   await expect(page.locator('.semantic-result.abstain')).toContainText('modellen kunde inte');
   await expect(page.locator('#retry-semantic')).toBeVisible();
   await page.getByText('Visa bestämmelsen', { exact: true }).click();
-  await expect(page.locator('.evidence blockquote')).toContainText('Antagande svar');
+  await expect(page.locator('.evidence blockquote').first()).toContainText('Antagande svar');
   await page.unroute('**/models/**');
   await page.locator('#retry-semantic').click();
   await expect(page.locator('#progress')).toBeHidden({ timeout: 30000 });
@@ -277,6 +297,7 @@ test('cancel local model download, preserve source validity and retry', async ({
   await mockApi(page);
   await page.route('**/models/**', async route => { started(); await gate; await route.abort(); });
   await page.goto('/');
+  await page.locator('#local-mode').check();
   await page.locator('#text').fill('Enligt 4 § avtalslagen ska ett sent svar räknas som ett nytt anbud.');
   await page.locator('#check').click();
   await ready;
@@ -294,7 +315,7 @@ test('local privacy mode extracts citations without sending document text to API
   const requests = await mockApi(page);
   await page.goto('/');
   await page.locator('#local-mode').check();
-  await expect(page.locator('#privacy-note')).toContainText('Lokal identifiering är aktiv');
+  await expect(page.locator('#privacy-note')).toContainText('Integritetsläge');
   const text = 'Enligt 4 § avtalslagen ska ett sent svar räknas som ett nytt anbud.';
   await page.locator('#text').fill(text);
   await page.locator('#check').click();
@@ -303,21 +324,34 @@ test('local privacy mode extracts citations without sending document text to API
   expect(requests.filter(r => r.method() === 'POST')).toHaveLength(0);
   expect(requests.filter(r => r.url().includes('/resolve?'))).toHaveLength(0);
   expect(requests.filter(r => r.url().includes('/range/')).length).toBeGreaterThanOrEqual(1);
-  await expect(page.locator('#report-meta')).toContainText('Lokal identifiering');
+  await expect(page.locator('#report-meta')).toContainText('Integritetsläge');
 });
 
 
 test('a supported claim shows separate source validity, original evidence, and print details', async ({ page }) => {
   await mockApi(page, { sourceText: '**4 §** Ett sent svar ska räknas som ett nytt anbud.\n\n**5 §** Annan bestämmelse.' });
   await page.goto('/');
+  await page.locator('#local-mode').check();
   await page.locator('#text').fill('Ett sent svar ska räknas som ett nytt anbud. Se 4 § avtalslagen.');
   await page.locator('#check').click();
   await expect(page.locator('#progress')).toBeHidden({ timeout: 45000 });
-  await expect(page.locator('.result > details > summary > .found')).toHaveCount(1);
+  await expect(page.locator('.badge.cite.found')).toHaveCount(1);
   await expect(page.locator('.semantic-result.correct, .semantic-result.supported')).toBeVisible();
   await expect(page.locator('.decisive-evidence')).toContainText('4 § Ett sent svar');
   await expect(page.locator('.semantic-result')).toContainText('Jämfört påstående: Ett sent svar');
   await page.evaluate(() => window.dispatchEvent(new Event('beforeprint')));
   await expect(page.locator('.semantic-evidence')).toHaveAttribute('open', '');
   await expect(page.locator('.semantic-evidence')).toContainText('scandi-nli-small-5c7d1ee-q8-v1');
+});
+
+test('normal mode compares claims on the server and renders the verdict', async ({ page }) => {
+  await mockApi(page, { sourceText: '**4 §** Ett sent svar ska räknas som ett nytt anbud.\n\n**5 §** Annan bestämmelse.' });
+  await page.goto('/');
+  await page.locator('#text').fill('Ett sent svar ska räknas som ett nytt anbud. Se 4 § avtalslagen.');
+  await page.locator('#check').click();
+  await expect(page.locator('#progress')).toBeHidden({ timeout: 30000 });
+  await expect(page.locator('#report-meta')).toContainText('serverjämförelse');
+  await expect(page.locator('.badge.sem.correct')).toBeVisible();
+  await expect(page.locator('.semantic-result.correct, .semantic-result.supported')).toBeVisible();
+  await expect(page.locator('.decisive-evidence')).toContainText('Ett sent svar');
 });

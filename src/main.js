@@ -1,8 +1,9 @@
 import './style.css';
 import { extract, getDocumentSource, pool, prefetchCorePack, request, resolveTarget, resolveTargetPrivate, stopExtractionWorker } from './api.js';
-import { citationSegments, claimContext, invalidCitationMessage, occurrenceStatus, validateBlocks } from './analysis.js';
-import { matchesFilter, MODEL_VERSION, rowSemantic, SEMANTIC, semanticClaim } from './semantic.js';
+import { claimContext, claimSegments, invalidCitationMessage, mergeOccurrences, occurrenceStatus, validateBlocks } from './analysis.js';
+import { matchesFilter, rowSemantic, SEMANTIC, semanticClaim } from './semantic.js';
 import { semanticClient } from './semantic-client.js';
+import { matchClaimRemote } from './api.js';
 
 const $ = selector => document.querySelector(selector);
 const STATUS = {
@@ -15,6 +16,7 @@ let rows = [];
 let targets = new Map();
 let sourceCache = new Map();
 let controller;
+let fileController;
 let selectedFile;
 let worker;
 let jobId = 0;
@@ -59,15 +61,31 @@ function stopWorker(reason = new DOMException('Avbruten', 'AbortError')) {
   jobs.clear();
 }
 
-function progress(message) {
-  $('#progress-label').textContent = message;
+function setProgress(fraction, message) {
+  $('#progress').hidden = false;
+  if (message !== undefined) $('#progress-label').textContent = message;
+  const bar = $('#progress-bar');
+  if (fraction == null) {
+    bar.classList.add('indeterminate');
+    bar.style.width = '';
+  } else {
+    bar.classList.remove('indeterminate');
+    bar.style.width = `${Math.max(0, Math.min(1, fraction)) * 100}%`;
+  }
+}
+
+// The semantic worker reports model-download progress as a fraction.
+function progress(message, fraction) {
+  setProgress(fraction ?? null, message);
 }
 
 function busy(active) {
   $('#progress').hidden = !active;
-  for (const selector of ['#text', '#file', '#remove-file', '#local-mode', '#check', '#retry', '#retry-semantic', '#clear', '#print']) {
+  for (const selector of ['#file', '#remove-file', '#local-mode', '#check', '#retry', '#retry-semantic', '#clear', '#print']) {
     $(selector).disabled = active;
   }
+  // A loaded file keeps the textarea disabled: it shows the received content.
+  $('#text').disabled = active || Boolean(selectedFile);
   if (!active) {
     $('#check').disabled = !blocks.length && !selectedFile;
     controller = undefined;
@@ -102,10 +120,13 @@ function resetReport() {
 }
 
 function clearFile() {
+  fileController?.abort();
+  fileController = undefined;
   selectedFile = undefined;
   $('#file').value = '';
   $('#file-name').textContent = 'eller dra filen till textfältet · högst 25 MB';
   $('#remove-file').hidden = true;
+  $('#text').disabled = false;
 }
 
 $('#text').addEventListener('input', () => {
@@ -117,24 +138,43 @@ $('#text').addEventListener('input', () => {
   warnings([]);
 });
 
-function chooseFile(file) {
-  if (!file || controller) return;
+async function chooseFile(file) {
+  if (!file || controller || fileController) return;
   if (!/\.(pdf|docx)$/i.test(file.name)) return displayError(new Error('Välj en PDF- eller DOCX-fil. Äldre DOC-filer stöds inte.'));
   if (file.size > 25 * 1024 * 1024) return displayError(new Error('Filen är större än 25 MB. Välj en mindre fil.'));
   resetReport();
   blocks = [];
   selectedFile = file;
   $('#text').value = '';
-  $('#character-count').textContent = 'Hela filen läses när du startar kontrollen';
+  $('#text').disabled = true;
   $('#file-name').textContent = `${file.name} · ${(file.size / 1024 / 1024).toLocaleString('sv', { maximumFractionDigits: 1 })} MB`;
   $('#remove-file').hidden = false;
-  $('#check').disabled = false;
+  $('#check').disabled = true;
   $('#input-wrap').open = true;
+  $('#error').hidden = true;
   warnings([]);
+  fileController = new AbortController();
+  const signal = fileController.signal;
+  try {
+    setProgress(null, 'Läser dokumentet på din enhet…');
+    await readSelectedFile(signal);
+    signal.throwIfAborted();
+    // Show the received content so the user sees the file was read.
+    $('#text').value = blocks.map(block => block.text).join('\n\n');
+    $('#character-count').textContent = `${[...$('#text').value].length.toLocaleString('sv')} tecken lästa ur filen`;
+    $('#check').disabled = !blocks.length;
+  } catch (error) {
+    if (error.name !== 'AbortError') { displayError(error); clearFile(); $('#text').value = ''; }
+  } finally {
+    if (fileController?.signal === signal) fileController = undefined;
+    $('#progress').hidden = true;
+  }
 }
 
 $('#file').addEventListener('change', event => chooseFile(event.target.files[0]));
 $('#remove-file').addEventListener('click', () => {
+  clearFile();
+  $('#text').value = '';
   $('#text').dispatchEvent(new Event('input'));
   $('#text').focus();
 });
@@ -160,13 +200,28 @@ function docxBlocks(html) {
   // Template contents are inert. Never insert converted HTML into the page.
   const template = document.createElement('template');
   template.innerHTML = html;
-  return [...template.content.querySelectorAll('p,h1,h2,h3,h4,h5,h6')].map((node, index) => {
-    node.querySelectorAll('a[href^="#footnote-ref"],a[href^="#endnote-ref"]').forEach(link => link.remove());
-    const footnote = node.closest('li[id]');
-    const label = footnote ? `${footnote.id.startsWith('endnote') ? 'Slutnot' : 'Fotnot'} ${footnote.id.split('-').at(-1)}` : `Stycke ${index + 1}`;
-    const reference = footnote && [...template.content.querySelectorAll('a[href]')].find(link => link.getAttribute('href') === `#${footnote.id}`);
-    return { id: `paragraph-${index + 1}`, label, text: node.textContent.trim(), claimContext: reference?.closest('p')?.textContent.trim() };
-  }).filter(block => block.text);
+  const content = template.content;
+  // Move each footnote or endnote inline where its marker sits, so a citation
+  // in a note is found and given context exactly like an inline citation.
+  const noteText = id => {
+    const item = content.querySelector(`li[id="${id}"]`);
+    if (!item) return '';
+    const clone = item.cloneNode(true);
+    clone.querySelectorAll('a[href^="#footnote-ref"],a[href^="#endnote-ref"]').forEach(link => link.remove());
+    return clone.textContent.replace(/\s+/g, ' ').trim();
+  };
+  for (const marker of content.querySelectorAll('a[id^="footnote-ref-"],a[id^="endnote-ref-"]')) {
+    const text = noteText((marker.getAttribute('href') ?? '').replace(/^#/, ''));
+    const target = marker.closest('sup') ?? marker;
+    if (text) target.replaceWith(document.createTextNode(` (${text})`));
+    else target.remove();
+  }
+  content.querySelectorAll('li[id^="footnote-"],li[id^="endnote-"]').forEach(item => item.remove());
+  content.querySelectorAll('ol,ul').forEach(list => { if (!list.querySelector('li')) list.remove(); });
+
+  return [...content.querySelectorAll('p,h1,h2,h3,h4,h5,h6')].map((node, index) => (
+    { id: `paragraph-${index + 1}`, label: `Stycke ${index + 1}`, text: node.textContent.trim() }
+  )).filter(block => block.text);
 }
 
 async function readSelectedFile(signal) {
@@ -285,7 +340,6 @@ function makeRow(row, index) {
     event.preventDefault();
     selectRow(index, { scrollDocument: true });
   });
-  node.querySelector('.result-number').textContent = String(index + 1).padStart(2, '0');
   node.querySelector('.result-title strong').textContent = row.occurrence.text;
   node.querySelector('.result-title small').textContent = row.occurrence.locations.map(location => checkedBlocks.find(block => block.id === location.block_id).label).join(' · ');
   node.querySelector('.result-title small').hidden = row.occurrence.locations.every(location => location.block_id === 'text');
@@ -302,41 +356,59 @@ function showDocument() {
     const article = element('article', 'document-block');
     article.append(element('h4', '', block.label));
     const text = element('div', 'document-text');
-    for (const segment of citationSegments(block, rows.map(row => row.occurrence))) {
+    // Mark both the claim sentence and the citation inside it.
+    for (const segment of claimSegments(block, rows)) {
       const content = block.text.slice(segment.start, segment.end);
-      if (!segment.rows.length) text.append(document.createTextNode(content));
-      else {
-        const mark = element('span', 'citation-mark', content);
-        mark.setAttribute('role', 'button');
-        mark.tabIndex = 0;
-        mark.addEventListener('keydown', event => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            mark.click();
-          }
-        });
-        mark.setAttribute('aria-controls', segment.rows.map(index => `citation-detail-${index}`).join(' '));
-        mark.addEventListener('click', () => selectRow(segment.rows.find(index => rowStatus(index) === 'invalid') ?? segment.rows[0], { focusAside: true }));
-        documentMarks.push({ node: mark, rows: segment.rows, blockId: block.id });
-        text.append(mark);
-      }
+      if (!segment.claimRows.length && !segment.citeRows.length) { text.append(document.createTextNode(content)); continue; }
+      const isCite = segment.citeRows.length > 0;
+      const rowsFor = isCite ? segment.citeRows : segment.claimRows;
+      const mark = element('span', isCite ? 'citation-mark' : 'claim-mark', content);
+      mark.setAttribute('role', 'button');
+      mark.tabIndex = 0;
+      mark.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); mark.click(); }
+      });
+      mark.setAttribute('aria-controls', rowsFor.map(index => `citation-detail-${index}`).join(' '));
+      mark.addEventListener('click', () => selectRow(rowsFor.find(index => rowStatus(index) === 'invalid') ?? rowsFor[0], { focusAside: true }));
+      documentMarks.push({ node: mark, claimRows: segment.claimRows, citeRows: segment.citeRows, rows: rowsFor, blockId: block.id, isCite });
+      text.append(mark);
     }
     article.append(text);
     return article;
   }));
 }
 
+// Pick the most severe semantic status among the rows a mark covers.
+const SEM_SEVERITY = ['incorrect', 'contradiction', 'misleading', 'missing', 'nonsensical', 'abstain', 'pending', 'correct', 'supported'];
+function worstSemantic(indices) {
+  let best = 'pending';
+  let rank = Infinity;
+  for (const index of indices) {
+    const rank2 = SEM_SEVERITY.indexOf(rowSemantic(rows[index]));
+    if (rank2 >= 0 && rank2 < rank) { rank = rank2; best = rowSemantic(rows[index]); }
+  }
+  return best;
+}
+
 function updateMarks() {
   for (const mark of documentMarks) {
-    const status = occurrenceStatus(mark.rows.map(index => ({ status: rowStatus(index) })));
-    const active = mark.rows.includes(selectedRow);
-    const isInvalid = status === 'invalid';
-    const review = mark.rows.some(index => ['incorrect', 'contradiction', 'misleading', 'missing'].includes(rowSemantic(rows[index])));
-    const claimLabel = isInvalid ? '' : [...new Set(mark.rows.map(index => SEMANTIC[rowSemantic(rows[index])]?.[0]).filter(Boolean))].join(', ');
-    mark.node.className = `citation-mark ${status}${active ? ' selected' : ''}${review && status === 'found' ? ' semantic-review' : ''}`;
-    mark.node.setAttribute('aria-label', `Hänvisning ${mark.rows.map(index => index + 1).join(', ')}: ${mark.node.textContent}. ${STATUS[status][1]}.${claimLabel ? ` Påstående: ${claimLabel} (experimentellt).` : ''} Visa detaljer.`);
+    const semIndices = mark.claimRows.length ? mark.claimRows : mark.rows;
+    const sem = worstSemantic(semIndices);
+    const active = mark.rows.includes(selectedRow) || mark.claimRows.includes(selectedRow);
+    if (mark.isCite) {
+      const status = occurrenceStatus(mark.citeRows.map(index => ({ status: rowStatus(index) })));
+      const tint = status === 'invalid' ? '' : ` tint-${sem}`;
+      const claimLabel = status === 'invalid' ? '' : SEMANTIC[sem]?.[0];
+      mark.node.className = `citation-mark ${status}${tint}${active ? ' selected' : ''}`;
+      mark.node.setAttribute('aria-label', `Hänvisning: ${mark.node.textContent}. ${STATUS[status][1]}.${claimLabel ? ` Påstående: ${claimLabel} (experimentellt).` : ''} Visa detaljer.`);
+      mark.node.title = status === 'invalid' ? STATUS[status][1] : `${STATUS[status][1]} · ${claimLabel} (experimentellt)`;
+    } else {
+      const label = SEMANTIC[sem]?.[0] ?? '';
+      mark.node.className = `claim-mark tint-${sem}${active ? ' selected' : ''}`;
+      mark.node.setAttribute('aria-label', `Påstående: ${label} (experimentellt). Visa detaljer.`);
+      mark.node.title = `Påstående: ${label} (experimentellt)`;
+    }
     mark.node.setAttribute('aria-pressed', String(active));
-    mark.node.title = isInvalid ? STATUS[status][1] : `${STATUS[status][1]} · ${claimLabel} (experimentellt)`;
   }
 }
 
@@ -382,17 +454,23 @@ function updateReport() {
     const rowTargets = row.occurrence.targets.map(target => targets.get(target.uri));
     const status = occurrenceStatus(rowTargets);
     counts[status]++;
-    const existing = node.querySelector('summary > .badge');
-    existing.className = `badge ${status}`;
-    existing.textContent = STATUS[status].join(' ');
+    const citeBadge = node.querySelector('.badge.cite');
+    citeBadge.className = `badge cite ${status}${status === 'pending' ? ' working' : ''}`;
+    citeBadge.textContent = status === 'pending' ? 'Kontrollerar' : STATUS[status][1];
     const filter = $('#filter').value;
     const semantic = rowSemantic(row);
+    const semBadge = node.querySelector('.badge.sem');
+    const claimLine = node.querySelector('.claim-line');
+    claimLine.replaceChildren();
     if (status === 'invalid') {
-      node.querySelector('.semantic-summary').textContent = '';
-      node.querySelector('.semantic-summary').className = 'semantic-summary';
+      semBadge.hidden = true;
     } else {
-      node.querySelector('.semantic-summary').textContent = `Påstående: ${SEMANTIC[semantic][0]}`;
-      node.querySelector('.semantic-summary').className = `semantic-summary ${semantic}`;
+      semBadge.hidden = false;
+      const working = semantic === 'pending';
+      semBadge.className = `badge sem ${semantic}${working ? ' working' : ''}`;
+      semBadge.textContent = working ? 'Bedömer…' : SEMANTIC[semantic][0];
+      if (row.claim?.hypothesis) claimLine.append(element('span', 'claim-label', 'Påstående:'), element('span', 'claim-text', row.claim.hypothesis));
+      else claimLine.append(element('span', 'claim-label', row.claim?.reason ?? 'Inget avgränsat påstående kunde skiljas ut.'));
     }
     node.hidden = !matchesFilter(filter, status, semantic);
     if (!node.hidden) visible++;
@@ -462,14 +540,36 @@ async function checkTarget(target, signal) {
 
 async function checkTargets(items, signal) {
   let done = 0;
-  progress(`Kontrollerar källor och hämtar text · 0 av ${items.length}`);
+  setProgress(items.length ? 0 : null, `Kontrollerar källor och hämtar text · 0 av ${items.length}`);
   await pool(items, async target => {
     await checkTarget(target, signal);
-    progress(`Kontrollerar källor och hämtar text · ${++done} av ${items.length}`);
+    setProgress(++done / items.length, `Kontrollerar källor och hämtar text · ${done} av ${items.length}`);
   }, signal);
 }
 
+// The server model runs in normal mode; the local browser model runs in
+// integritetsläge. Both return the same result shape for the report.
+async function assessClaim(claim, evidence, isLocal, signal) {
+  if (isLocal) return semantics.assess(claim, evidence, signal);
+  // The server windows the premise itself. Send the selected passages as one
+  // source in document order, so the model reads coherent context instead of
+  // BM25-ranked fragments in the wrong order.
+  const ordered = [...evidence.passages].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+  const citation = [...new Set(ordered.map(passage => [passage.court, passage.section].filter(Boolean).join(' ')).filter(Boolean))].join(' · ') || undefined;
+  const sources = ordered.length ? [{ text: ordered.map(passage => passage.text).join('\n\n'), citation }] : [];
+  const response = await matchClaimRemote(claim.hypothesis, sources, { signal });
+  return {
+    status: response.status,
+    reason: response.reason,
+    evidence: response.evidence ? { text: response.evidence.source ?? response.evidence } : undefined,
+    comparisons: (response.comparisons ?? []).map(item => ({ text: item.source, scores: item.scores })),
+    backend: 'Server',
+    model: response.model_version || response.model,
+  };
+}
+
 async function compareClaims(signal, retry = false) {
+  const isLocal = Boolean($('#local-mode')?.checked);
   let failure;
   let done = 0;
   for (const row of rows) {
@@ -493,14 +593,14 @@ async function compareClaims(signal, retry = false) {
       if (reason) result = { status: 'abstain', reason };
       else if (failure) result = { status: 'abstain', reason: failure, retryable: true };
       else {
-        progress(`Jämför påståenden lokalt · hänvisning ${done + 1} av ${rows.length}`);
+        setProgress(done / rows.length, `${isLocal ? 'Jämför påståenden lokalt' : 'Jämför påståenden på servern'} · hänvisning ${done + 1} av ${rows.length}`);
         try {
-          result = await semantics.assess(row.claim, evidence, signal);
+          result = await assessClaim(row.claim, evidence, isLocal, signal);
           signal.throwIfAborted();
         } catch (error) {
           if (signal.aborted) throw error;
-          failure = error.message;
-          semantics.stop();
+          failure = isLocal ? error.message : 'Serverjämförelsen kunde inte nås. Försök igen.';
+          if (isLocal) semantics.stop();
           result = { status: 'abstain', reason: failure, retryable: true };
         }
       }
@@ -517,28 +617,19 @@ function updatePrivacyNote() {
   const note = $('#privacy-note');
   if (!note) return;
   if (isLocal) {
-    note.innerHTML = '<span aria-hidden="true">🔒</span> <strong>Lokal identifiering är aktiv.</strong> Texten analyseras lokalt i webbläsaren med LagrumParser. Källor kontrolleras anonymt med <em>k</em>-anonymitet (/range) och hämtas via volympaket när tillgängligt. Varken ditt dokument eller dina specifika hänvisningar läcker till servern. Den lokala jämförelsen körs i webbläsaren.';
+    note.innerHTML = '<span aria-hidden="true">🔒</span> <strong>Integritetsläge.</strong> Dokumentet och dina hänvisningar stannar på din enhet. Jämförelsen körs av en lokal modell i webbläsaren, som hämtar cirka 25 MB modellfiler första gången. <a href="./sa-funkar-det.html">Så funkar det</a>.';
   } else {
-    note.innerHTML = '<span aria-hidden="true">↳</span> Texten skickas till lagen.nu för att hitta hänvisningar. Den behandlas tillfälligt i minnet, tas bort efter behandlingen, sparas aldrig och skickas aldrig vidare. Resultatet skickas endast till dig. Originalfilen stannar på din enhet. Den lokala jämförelsen hämtar cirka 25 MB modellfiler samt körmiljön första gången. Filerna hämtas från denna webbplats och kan återanvändas.';
+    note.innerHTML = '<span aria-hidden="true">↳</span> <strong>Normalläge.</strong> Texten skickas till lagen.nu för att hitta hänvisningar. Påståenden och utvalda källavsnitt jämförs på slopchecks server. Inget sparas. <a href="./sa-funkar-det.html">Så funkar det</a>.';
   }
 }
 
 if ($('#local-mode')) {
-  try {
-    if (localStorage.getItem('slopcheck:local_mode') === '1') {
-      $('#local-mode').checked = true;
-      updatePrivacyNote();
-      prefetchCorePack();
-    }
-  } catch {}
+  // Integritetsläge defaults to off on every load.
+  $('#local-mode').checked = false;
+  updatePrivacyNote();
   $('#local-mode').addEventListener('change', () => {
-    try {
-      localStorage.setItem('slopcheck:local_mode', $('#local-mode').checked ? '1' : '0');
-    } catch {}
     updatePrivacyNote();
-    if ($('#local-mode').checked) {
-      prefetchCorePack();
-    }
+    if ($('#local-mode').checked) prefetchCorePack();
   });
 }
 
@@ -550,19 +641,19 @@ $('#check').addEventListener('click', async () => {
   const isLocal = Boolean($('#local-mode')?.checked);
   warnings([]);
   try {
-    if (selectedFile) await readSelectedFile(signal);
+    if (selectedFile && !blocks.length) await readSelectedFile(signal);
     signal.throwIfAborted();
     progress(isLocal ? 'Hittar hänvisningar lokalt i webbläsaren…' : 'Hittar hänvisningar genom lagen.nu…');
     validateBlocks(blocks);
     checkedBlocks = blocks.map(block => ({ ...block }));
-    const occurrences = await extract(checkedBlocks, signal, { local: isLocal });
+    const occurrences = mergeOccurrences(await extract(checkedBlocks, signal, { local: isLocal }), checkedBlocks);
     signal.throwIfAborted();
     rows = occurrences.map(occurrence => ({ occurrence, claim: semanticClaim(occurrence, claimContext(occurrence, checkedBlocks), checkedBlocks, occurrences), evidence: new Map(), semantic: new Map(occurrence.targets.map(target => [target.uri, { status: 'pending' }])), semanticRevision: 0 }));
     for (const row of rows) for (const target of row.occurrence.targets) targets.set(target.uri, { ...target, status: 'pending', revision: 0 });
     reportName = selectedFile ? selectedFile.name : 'Inklistrad text';
     reportDate = new Date().toLocaleString('sv');
-    const modeLabel = isLocal ? 'Lokal identifiering' : 'Serveridentifiering';
-    $('#report-meta').textContent = `${reportName} · ${reportDate} · ${targets.size} unika mål · ${modeLabel} · ${MODEL_VERSION} (experimentellt)`;
+    const modeLabel = isLocal ? 'Integritetsläge · lokal jämförelse i webbläsaren' : 'Normalläge · serverjämförelse';
+    $('#report-meta').textContent = `${reportName} · ${reportDate} · ${targets.size} unika mål · ${modeLabel} (experimentellt)`;
     $('#filter').value = 'all';
     $('#results').replaceChildren(...rows.map(makeRow));
     showDocument();
