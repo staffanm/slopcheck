@@ -124,10 +124,45 @@ not read the 1736 wording as a contradiction. Both supported claims against that
 fail. Archaic statute text is a gap the provision-based pairs do not cover, because the generator
 takes provisions of 150 to 1,200 characters from acts in force without regard to age.
 
+## Relaxed targets, 22 September 2026
+
+The fail-closed policy left the served model able to say only "Stöd saknas", which on a real
+memo of 19 citations meant no verdict at all. `scripts/calibrate_onnx.py` now takes
+`--target-precision CLASS=VALUE`, and the served calibration was rerun with 0.85 for every
+class and a 0.10 Wilson slack, the strictest setting at which all four classes come on:
+
+```sh
+uv run --python 3.12 --with onnxruntime --with transformers --with numpy --with scipy --with brotli --with fastapi --with pydantic \
+  python scripts/calibrate_onnx.py --model-dir models/classifier-kb-bert-4way-v2 --wilson-slack 0.10 \
+  --target-precision supported=0.85 --target-precision incorrect=0.85 --target-precision unsupported=0.85 --target-precision misleading=0.85
+```
+
+Thresholds: supported 0.504, unsupported 0.812, incorrect 0.764, misleading 0.648; margin 0.2;
+temperature unchanged at 1.7824.
+
+| Set | Accepted | Precision on accepted |
+|---|---:|---:|
+| calibration, 672 rows | 323 (48%) | 0.861 |
+| test, 860 rows | 513 (60%) | 0.856 |
+| test, `supported` | 161 | 0.820 |
+| test, `unsupported` | 175 | 0.960 |
+| test, `incorrect` | 57 | 0.912 |
+| test, `misleading` | 120 | 0.725 |
+| test, provision pairs | 248 of 312 | 0.968 |
+| test, judgment-derived | 265 of 548 | 0.751 |
+| source-grounding fixture | 13 of 28 | 9 right, 4 wrong |
+| legal-claims fixture | 23 of 62 | 9 right, 14 wrong |
+
+The price is visible in `misleading`: about one "Vilseledande" label in four is wrong on the
+test partition, prop pages accept at 0.745, and on the legal-claims fixture more accepted labels
+are wrong than right. The `models/` directory is not in git, so the new
+`calibration.json` has to be copied to the server's `models/classifier-kb-bert-4way-v2/` and
+the backend container restarted before it takes effect.
+
 Still open:
 
-- `supported`, `incorrect` and `misleading` are disabled by the fail-closed policy. The next step
-  for them is an LLM-judge pass over the existing `incorrect` and `misleading` rows, as the
+- `supported`, `incorrect` and `misleading` only pass 0.85 targets, not the PRD's 0.95 and 0.90.
+  The next step for them is an LLM-judge pass over the existing `incorrect` and `misleading` rows, as the
   provision-based generator already does, and more `supported` rows in memo register.
 - `statute_stycke` has 10 test rows and 0.2 accuracy; the provision-based generator does not
   produce stycke pinpoints.

@@ -159,6 +159,8 @@ def main() -> None:
     parser.add_argument("--minimum-accepted", type=int, default=30)
     parser.add_argument("--wilson-slack", type=float, default=0.05)
     parser.add_argument("--no-wilson", action="store_true")
+    parser.add_argument("--target-precision", action="append", default=[], metavar="CLASS=VALUE",
+                        help="Override a class's target precision, e.g. supported=0.90. Repeatable.")
     parser.add_argument("--threads", type=int, default=8)
     parser.add_argument("--report-dir", default=None, help="Where to write calibration.json and evaluation_report.json (default: model dir).")
     args = parser.parse_args()
@@ -174,6 +176,11 @@ def main() -> None:
     temperature = fit_temperature(cal_logits, cal_targets)
     cal_probs = softmax(cal_logits, temperature)
     target_precisions = {"supported": 0.95, "incorrect": 0.95, "unsupported": 0.90, "misleading": 0.90}
+    for override in args.target_precision:
+        class_name, value = override.split("=")
+        if class_name not in target_precisions:
+            parser.error(f"unknown class {class_name!r} in --target-precision")
+        target_precisions[class_name] = float(value)
     selection = select_fail_closed_thresholds(
         cal_probs, cal_targets, CLASSES, target_precisions,
         minimum_accepted=args.minimum_accepted, use_wilson_lower_bound=not args.no_wilson, wilson_slack=args.wilson_slack,
