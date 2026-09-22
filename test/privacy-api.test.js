@@ -228,6 +228,24 @@ test('artifactToMarkdown converts AST to markdown with accurate anchor offsets',
   assert.ok(p1Text.startsWith('**1 §** Syftet med denna lag'));
 });
 
+test('artifactToMarkdown anchors each printed page of a förarbete', async () => {
+  const { artifactToMarkdown } = await import('../src/privacy-api.js');
+  const artifact = { artifact: { structure: [
+    { type: 'stycke', page: 51, text: 'Slutet av sidan 51.' },
+    { type: 'avsnitt', id: 'sec77', level: 3, page: 52, text: 'Storlekskravet i lagen', children: [
+      { type: 'stycke', page: 52, text: 'Första stycket på sidan 52.' },
+      { type: 'stycke', page: 52, text: 'Andra stycket på sidan 52.' },
+      { type: 'stycke', page: 53, text: 'Stycket på sidan 53.' },
+    ] },
+    { type: 'stycke', page: 54, text: 'Sidan 54.' },
+  ] } };
+  const { markdown, anchors } = artifactToMarkdown(artifact);
+  assert.equal(markdown.slice(...anchors.sid52).trim(), 'Storlekskravet i lagen\n\nFörsta stycket på sidan 52.\n\nAndra stycket på sidan 52.');
+  assert.equal(markdown.slice(...anchors.sid53).trim(), 'Stycket på sidan 53.');
+  assert.equal(markdown.slice(...anchors.sid54).trim(), 'Sidan 54.');
+  assert.equal(anchors.sid51[1], anchors.sid52[0]);
+});
+
 test('OHTTP key parsing, BHTTP framing, and HPKE mutual cycle', async () => {
   const {
     parseOhttpKeys,

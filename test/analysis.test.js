@@ -8,6 +8,22 @@ import { citationSegments, claimContext, claimSegments, classifyResolution, extr
 import { extract } from '../src/api.js';
 import { extractLocal, getLocalParser } from '../src/lagrum-extract.js';
 
+test('a page pinpoint reads the cited pages in whole paragraphs', () => {
+  const markdown = 'Sidan 51.\n\nRubrik\n\nEnligt regeringens mening ska separata bedömningar göras för varje juridisk person. I fråga om en koncern ska således en enskild bedömning göras för varje koncernföretag.\n\nSidan 53 om koncern.\n\nSidan 54.';
+  const at = text => markdown.indexOf(text);
+  const anchors = { sid51: [0, at('Rubrik')], sid52: [at('Rubrik'), at('Sidan 53')], sid53: [at('Sidan 53'), at('Sidan 54')], sid54: [at('Sidan 54'), markdown.length] };
+  const page = provisionText(markdown, 'https://lagen.nu/prop/2025/26:28#sid52', anchors);
+  assert.equal(page.exact, true);
+  assert.equal(page.label, 'Visa s. 52');
+  assert.ok(page.text.startsWith('Rubrik') && page.text.endsWith('koncernföretag.'));
+  assert.equal(provisionText(markdown, 'https://lagen.nu/prop/2025/26:28#sid99', anchors).exact, false);
+  const claim = { text: 'Varje bolag i en koncern bedöms separat (prop. 2025/26:28 s. 52).', hypothesis: 'Varje bolag i en koncern bedöms separat.', assessable: true };
+  const evidence = selectEvidence(markdown, 'https://lagen.nu/prop/2025/26:28#sid52', claim, anchors);
+  assert.equal(evidence.label, 'Visa s. 52');
+  // The whole page goes to the model in document order; it windows itself.
+  assert.deepEqual(evidence.passages.map(passage => passage.text.split(' ')[0]), ['Rubrik', 'Enligt']);
+});
+
 test('pasted chapter and provision stay together, with offsets in the original text', () => {
   for (const newline of ['\n', '\r\n', '\n     ', '\r\n\t']) {
     const text = '📄 Se avtalslagen.\n\n' + pasted.text.replace('\n', newline);

@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 
 const invalidUri = 'https://lagen.nu/dom/nja/2013s372';
 const validUri = 'https://lagen.nu/1915:218#P4';
+const propUri = 'https://lagen.nu/prop/2025/26:28';
 const procedureUri = 'https://lagen.nu/1942:740#K18P7';
 const source = '**4 §** Antagande svar, som för sent kommer anbudsgivaren till handa, skall gälla såsom nytt anbud.\n\n**5 §** En annan regel.';
 
@@ -17,17 +18,24 @@ async function mockApi(page, { failResolve = false, sourceText = source } = {}) 
     if (url.pathname.endsWith('/citations/extract')) {
       const input = request.postDataJSON();
       const blocks = input.blocks ?? [{ id: 'text', text: input.text }];
-      const occurrences = blocks.flatMap(block => [...block.text.matchAll(/NJA 2013 s\. 372|4 § avtalslagen|18 kap\. 7 § rättegångsbalken/g)].map(match => ({
+      const occurrences = blocks.flatMap(block => [...block.text.matchAll(/NJA 2013 s\. 372|4 § avtalslagen|18 kap\. 7 § rättegångsbalken|prop\. 2025\/26:28 s\. 116|117/g)].map(match => ({
         text: match[0], locations: [{ block_id: block.id, start: match.index, end: match.index + match[0].length }],
-        targets: [{ uri: match[0].startsWith('NJA') ? invalidUri : match[0].startsWith('18 kap.') ? procedureUri : validUri, source: match[0].startsWith('NJA') ? 'dv' : 'sfs' }],
+        targets: [{ uri: /^\d+$/.test(match[0]) ? `${propUri}#sid${match[0]}` : match[0].startsWith('prop.') ? `${propUri}#sid116` : match[0].startsWith('NJA') ? invalidUri : match[0].startsWith('18 kap.') ? procedureUri : validUri, source: match[0].startsWith('NJA') ? 'dv' : match[0].startsWith('prop') || /^\d+$/.test(match[0]) ? 'forarbete' : 'sfs' }],
       })));
       await route.fulfill({ json: { offset_unit: 'utf-16', occurrences } });
     } else if (url.pathname.endsWith('/resolve')) {
       if (failResolve) return route.abort('internetdisconnected');
       const uri = url.searchParams.get('q');
       await route.fulfill({ json: uri === invalidUri ? { results: [], recognized: [{ uri, invalid: true }] } : {
-        results: [{ uri: uri.split('#')[0], display: 'Källa', pin: { uri, label: uri === procedureUri ? '18 kap. 7 §' : '4 §' } }], recognized: [],
+        results: [{ uri: uri.split('#')[0], display: 'Källa', pin: { uri, label: uri.startsWith(propUri) ? `s. ${uri.split('#sid')[1]}` : uri === procedureUri ? '18 kap. 7 §' : '4 §' } }], recognized: [],
       } });
+    } else if (url.pathname.endsWith('/document') && url.searchParams.get('uri') === propUri) {
+      await route.fulfill({ json: { uri: propUri, artifact: { structure: [
+        { type: 'stycke', page: 115, text: 'Sidan 115.' },
+        { type: 'stycke', page: 116, text: 'Flera verksamhetsutövare i en koncern kan behöva rapportera samma incident.' },
+        { type: 'stycke', page: 117, text: 'Rapporteringen sker till tillsynsmyndigheten.' },
+        { type: 'stycke', page: 118, text: 'Sidan 118.' },
+      ] } } });
     } else if (url.pathname.includes('/range/')) {
       if (failResolve) return route.abort('internetdisconnected');
       await route.fulfill({
@@ -229,7 +237,7 @@ test('pasted line wraps resolve once and highlight the unchanged original citati
   expect(requests.filter(r => r.url().includes('/resolve?')).map(r => new URL(r.url()).searchParams.get('q'))).toEqual([pasted.target]);
   await page.locator('.citation-mark').click();
   await expect(page.locator('.result.selected')).toBeVisible();
-  await expect(page.locator('.result.selected .source-item > a')).toHaveAttribute('href', pasted.target);
+  await expect(page.locator('.result.selected .source-links a')).toHaveAttribute('href', pasted.target);
   expect(await page.locator('.citation-mark').evaluate(node => node.getClientRects().length)).toBeGreaterThan(1);
 });
 
@@ -345,6 +353,43 @@ test('a supported claim shows separate source validity, original evidence, and p
   await page.evaluate(() => window.dispatchEvent(new Event('beforeprint')));
   await expect(page.locator('.semantic-evidence')).toHaveAttribute('open', '');
   await expect(page.locator('.semantic-evidence')).toContainText(manifest.version);
+});
+
+test('a page range is one judgment over both pages, sent whole', async ({ page }) => {
+  const requests = await mockApi(page);
+  const matches = [];
+  page.on('request', request => { if (request.url().endsWith('/api/match')) matches.push(request.postDataJSON()); });
+  await page.goto('/');
+  await page.locator('#text').fill('Ett sent svar räknas som ett nytt anbud även inom en koncern. Se prop. 2025/26:28 s. 116–117.');
+  await page.locator('#check').click();
+  await expect(page.locator('#progress')).toBeHidden({ timeout: 30000 });
+  await expect(page.locator('.result')).toHaveCount(1);
+  expect(matches).toHaveLength(1);
+  expect(matches[0].sources.map(source => source.citation)).toEqual(['s. 116', 's. 117']);
+  expect(matches[0].sources[0].text).toBe('Flera verksamhetsutövare i en koncern kan behöva rapportera samma incident.');
+  expect(matches[0].sources[1].text).toBe('Rapporteringen sker till tillsynsmyndigheten.');
+  // One source card: both page links on one line, one verdict, no passage list beside the comparison.
+  await expect(page.locator('.source-item')).toHaveCount(1);
+  await expect(page.locator('.source-links a')).toHaveText(['s. 116 ↗', 's. 117 ↗']);
+  await expect(page.locator('.semantic-result')).toHaveCount(1);
+  await expect(page.locator('.decisive-evidence')).toHaveCount(1);
+  await expect(page.locator('.source-item .evidence')).toHaveCount(0);
+});
+
+test('a claim rejected before comparison abstains its cited pages together', async ({ page }) => {
+  await mockApi(page);
+  let matchCalls = 0;
+  page.on('request', request => { if (request.url().endsWith('/api/match')) matchCalls++; });
+  await page.goto('/');
+  await page.locator('#text').fill('De kan således centralisera IT. Se prop. 2025/26:28 s. 116–117.');
+  await page.locator('#check').click();
+  await expect(page.locator('#progress')).toBeHidden({ timeout: 30000 });
+  await expect(page.locator('.result')).toHaveCount(1);
+  expect(matchCalls).toBe(0);
+  await expect(page.locator('.source-item')).toHaveCount(1);
+  await expect(page.locator('.source-links a')).toHaveText(['s. 116 ↗', 's. 117 ↗']);
+  await expect(page.locator('.semantic-result')).toHaveCount(1);
+  await expect(page.locator('.semantic-result')).toContainText('sammanhang som inte kunde avgränsas');
 });
 
 test('normal mode compares claims on the server and renders the verdict', async ({ page }) => {

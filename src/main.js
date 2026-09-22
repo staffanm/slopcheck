@@ -219,9 +219,23 @@ function docxBlocks(html) {
   content.querySelectorAll('li[id^="footnote-"],li[id^="endnote-"]').forEach(item => item.remove());
   content.querySelectorAll('ol,ul').forEach(list => { if (!list.querySelector('li')) list.remove(); });
 
-  return [...content.querySelectorAll('p,h1,h2,h3,h4,h5,h6')].map((node, index) => (
-    { id: `paragraph-${index + 1}`, label: `Stycke ${index + 1}`, text: node.textContent.trim() }
-  )).filter(block => block.text);
+  // Numbered and bulleted paragraphs become list items. Take each item's own
+  // text, without the nested lists and paragraphs that are blocks of their own.
+  const ownText = node => {
+    if (node.tagName !== 'LI') return node.textContent.trim();
+    const clone = node.cloneNode(true);
+    clone.querySelectorAll('ol,ul,p,h1,h2,h3,h4,h5,h6').forEach(child => child.remove());
+    return clone.textContent.trim();
+  };
+  // A docx has no page numbers, so a block is located by its nearest heading.
+  let heading = '';
+  return [...content.querySelectorAll('p,h1,h2,h3,h4,h5,h6,li')].map((node, index) => {
+    const kind = /^H[1-6]$/.test(node.tagName) ? 'heading' : node.tagName === 'LI' ? 'item' : 'paragraph';
+    const text = ownText(node);
+    if (kind === 'heading' && text) heading = text;
+    const marker = kind !== 'item' ? '' : node.parentElement.tagName === 'OL' ? `${[...node.parentElement.children].indexOf(node) + 1}.` : '•';
+    return { id: `paragraph-${index + 1}`, label: kind === 'heading' ? '' : heading, kind, level: kind === 'heading' ? Number(node.tagName[1]) : 0, marker, text };
+  }).filter(block => block.text);
 }
 
 async function readSelectedFile(signal) {
@@ -260,8 +274,10 @@ function passageLabel(passage) {
   return [passage.court, passage.section].filter(Boolean).join(' · ');
 }
 
-function renderSource(target, evidence, multiple, row) {
+function renderSource(group, multiple, row) {
+  // A group is one target, or the targets of one joint judgment.
   const section = element('section', 'source-item');
+  const [target] = group;
   if (multiple) {
     section.append(badge(target.status));
     if (target.status !== 'found') section.append(element('p', 'source-note', target.uri));
@@ -274,7 +290,12 @@ function renderSource(target, evidence, multiple, row) {
     }[target.status]));
     return section;
   }
-  section.append(sourceLink(target.result.pin?.uri ?? target.result.uri, target.result.pin?.label ?? target.result.display ?? target.result.identifier ?? target.uri));
+  const links = element('p', 'source-links');
+  group.forEach((item, index) => {
+    if (index) links.append(' · ');
+    links.append(sourceLink(item.result.pin?.uri ?? item.result.uri, item.result.pin?.label ?? item.result.display ?? item.result.identifier ?? item.uri));
+  });
+  section.append(links);
   const result = row.semantic.get(target.uri);
   if (result) {
     const review = element('div', `semantic-result ${result.status}${result.status === 'correct' ? ' supported' : ''}${result.status === 'incorrect' ? ' contradiction' : ''}`);
@@ -303,30 +324,36 @@ function renderSource(target, evidence, multiple, row) {
     }
     section.append(review);
   }
-  if (target.sourceError) section.append(element('p', 'source-note', `Källtexten kunde inte hämtas: ${target.sourceError}`));
-  else if (!evidence) section.append(element('p', 'source-note', 'Hämtar källtext…'));
-  else {
-    if (evidence.quote) section.append(element('p', 'source-note', 'Citerade ord finns i källtexten.'));
-    if (!evidence.passages.length) section.append(element('p', 'source-note', evidence.reason ?? 'Källan saknar läsbar text.'));
+  // The comparison shows what the model read, so the passage list is shown
+  // only until a comparison exists.
+  if (result?.comparisons?.length) return section;
+  for (const item of group) {
+    const evidence = row.evidence.get(item.uri);
+    if (item.sourceError) section.append(element('p', 'source-note', `Källtexten kunde inte hämtas: ${item.sourceError}`));
+    else if (!evidence) section.append(element('p', 'source-note', 'Hämtar källtext…'));
     else {
-      const passages = element('details', 'evidence');
-      passages.append(element('summary', '', evidence.exact ? 'Visa bestämmelsen' : 'Visa utvalda källavsnitt'));
-      if (!evidence.exact) passages.append(element('p', 'source-note', evidence.scope ?? 'Avsnitt ur hela källan; den exakta bestämmelsen kunde inte avgränsas.'));
-      evidence.passages.forEach(passage => {
-        if (passageLabel(passage)) passages.append(element('p', 'source-note', passageLabel(passage)));
-        passages.append(element('blockquote', '', passage.text));
-      });
-      section.append(passages);
-    }
-    if (evidence.excluded?.length) {
-      const excluded = element('details', 'reported-evidence');
-      excluded.append(element('summary', '', 'Andra instanser och återgivna uppgifter'));
-      excluded.append(element('p', 'source-note', 'Dessa avsnitt används inte som stöd för den bedömande domstolens slutsats.'));
-      evidence.excluded.forEach(passage => {
-        excluded.append(element('p', 'source-note', passageLabel(passage)));
-        excluded.append(element('blockquote', '', passage.text));
-      });
-      section.append(excluded);
+      if (evidence.quote) section.append(element('p', 'source-note', 'Citerade ord finns i källtexten.'));
+      if (!evidence.passages.length) section.append(element('p', 'source-note', evidence.reason ?? 'Källan saknar läsbar text.'));
+      else {
+        const passages = element('details', 'evidence');
+        passages.append(element('summary', '', evidence.label ?? (evidence.exact ? 'Visa bestämmelsen' : 'Visa utvalda källavsnitt')));
+        if (!evidence.exact) passages.append(element('p', 'source-note', evidence.scope ?? 'Avsnitt ur hela källan; den exakta bestämmelsen kunde inte avgränsas.'));
+        evidence.passages.forEach(passage => {
+          if (passageLabel(passage)) passages.append(element('p', 'source-note', passageLabel(passage)));
+          passages.append(element('blockquote', '', passage.text));
+        });
+        section.append(passages);
+      }
+      if (evidence.excluded?.length) {
+        const excluded = element('details', 'reported-evidence');
+        excluded.append(element('summary', '', 'Andra instanser och återgivna uppgifter'));
+        excluded.append(element('p', 'source-note', 'Dessa avsnitt används inte som stöd för den bedömande domstolens slutsats.'));
+        evidence.excluded.forEach(passage => {
+          excluded.append(element('p', 'source-note', passageLabel(passage)));
+          excluded.append(element('blockquote', '', passage.text));
+        });
+        section.append(excluded);
+      }
     }
   }
   return section;
@@ -341,8 +368,9 @@ function makeRow(row, index) {
     selectRow(index, { scrollDocument: true });
   });
   node.querySelector('.result-title strong').textContent = row.occurrence.text;
-  node.querySelector('.result-title small').textContent = row.occurrence.locations.map(location => checkedBlocks.find(block => block.id === location.block_id).label).join(' · ');
-  node.querySelector('.result-title small').hidden = row.occurrence.locations.every(location => location.block_id === 'text');
+  const labels = [...new Set(row.occurrence.locations.map(location => checkedBlocks.find(block => block.id === location.block_id).label).filter(Boolean))];
+  node.querySelector('.result-title small').textContent = labels.join(' · ');
+  node.querySelector('.result-title small').hidden = !labels.length;
   return node;
 }
 
@@ -352,9 +380,14 @@ function rowStatus(index) {
 
 function showDocument() {
   documentMarks = [];
-  $('#document-content').replaceChildren(...checkedBlocks.map(block => {
-    const article = element('article', 'document-block');
-    article.append(element('h4', '', block.label));
+  // A PDF page is its own block with a page label. Docx blocks flow as one
+  // document, with headings and list items styled as such.
+  const flowing = checkedBlocks.every(block => block.kind);
+  const nodes = checkedBlocks.map(block => {
+    const article = element(flowing ? 'div' : 'article', flowing ? `document-${block.kind}` : 'document-block');
+    if (flowing && block.kind === 'heading') article.dataset.level = block.level;
+    if (flowing && block.kind === 'item') article.dataset.marker = block.marker;
+    if (!flowing) article.append(element('h4', '', block.label));
     const text = element('div', 'document-text');
     // Mark both the claim sentence and the citation inside it.
     for (const segment of claimSegments(block, rows)) {
@@ -375,7 +408,9 @@ function showDocument() {
     }
     article.append(text);
     return article;
-  }));
+  });
+  $('#document-content').replaceChildren(...(flowing ? [element('article', 'document-block')] : nodes));
+  if (flowing) $('#document-content').firstChild.append(...nodes);
 }
 
 // Pick the most severe semantic status among the rows a mark covers.
@@ -478,7 +513,13 @@ function updateReport() {
     const revision = rowTargets.map(target => `${target.uri}:${target.revision}`).join('|') + `:${row.evidence.size}:${row.semanticRevision}`;
     if (node.dataset.revision !== revision) {
       node.dataset.revision = revision;
-      node.querySelector('.source-list').replaceChildren(...rowTargets.map(target => renderSource(target, row.evidence.get(target.uri), rowTargets.length > 1, row)));
+      const groups = [];
+      for (const target of rowTargets) {
+        const primary = row.semantic.get(target.uri)?.joint?.primary;
+        const group = primary && groups.find(item => item.primary === primary);
+        if (group) group.targets.push(target); else groups.push({ primary, targets: [target] });
+      }
+      node.querySelector('.source-list').replaceChildren(...groups.map(group => renderSource(group.targets, groups.length > 1, row)));
       if (!rowTargets.length) node.querySelector('.source-list').append(element('p', 'source-note', 'Hänvisningen kunde inte kopplas till en källa.'));
     }
   });
@@ -549,14 +590,25 @@ async function checkTargets(items, signal) {
 
 // The server model runs in normal mode; the local browser model runs in
 // integritetsläge. Both return the same result shape for the report.
-async function assessClaim(claim, evidence, isLocal, signal) {
-  if (isLocal) return semantics.assess(claim, evidence, signal);
-  // The server windows the premise itself. Send the selected passages as one
-  // source in document order, so the model reads coherent context instead of
-  // BM25-ranked fragments in the wrong order.
-  const ordered = [...evidence.passages].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-  const citation = [...new Set(ordered.map(passage => [passage.court, passage.section].filter(Boolean).join(' ')).filter(Boolean))].join(' · ') || undefined;
-  const sources = ordered.length ? [{ text: ordered.map(passage => passage.text).join('\n\n'), citation }] : [];
+function sourceCitation(target, evidence) {
+  return target.result?.pin?.label
+    ?? ([...new Set(evidence.passages.map(passage => passageLabel(passage)).filter(Boolean))].join(' · ') || undefined);
+}
+
+// One judgment over every cited source of a row: "s. 116–117" is two pages
+// with one claim. The server windows across the sources itself; the local
+// model reads the pooled passages.
+async function assessClaim(claim, items, isLocal, signal) {
+  const ordered = items.map(({ target, evidence }) => ({
+    citation: sourceCitation(target, evidence),
+    passages: [...evidence.passages].sort((a, b) => (a.index ?? 0) - (b.index ?? 0)),
+  }));
+  if (isLocal) {
+    const pooled = ordered.flatMap(({ citation, passages }) => passages.map(passage => ({ ...passage, section: passage.section ?? (items.length > 1 ? citation : undefined) })))
+      .map((passage, index) => ({ ...passage, index }));
+    return semantics.assess(claim, { ...items[0].evidence, passages: pooled }, signal);
+  }
+  const sources = ordered.map(({ citation, passages }) => ({ text: passages.map(passage => passage.text).join('\n\n'), citation }));
   const response = await matchClaimRemote(claim.hypothesis, sources, { signal });
   return {
     status: response.status,
@@ -573,6 +625,7 @@ async function compareClaims(signal, retry = false) {
   let failure;
   let done = 0;
   for (const row of rows) {
+    const ready = [];
     for (const target of row.occurrence.targets.map(item => targets.get(item.uri))) {
       signal.throwIfAborted();
       if (retry && !row.semantic.get(target.uri)?.retryable) continue;
@@ -583,19 +636,29 @@ async function compareClaims(signal, retry = false) {
         continue;
       }
       const evidence = row.evidence.get(target.uri);
-      let reason = !row.claim.assessable ? row.claim.reason
-        : target.status !== 'found' ? 'Källan har inte bekräftats.'
+      // Only a problem with this source abstains it alone. A problem with the
+      // claim abstains the row's sources together, as one judgment would.
+      const reason = target.status !== 'found' ? 'Källan har inte bekräftats.'
         : target.sourceError ? 'Källtexten kunde inte hämtas för jämförelse.'
         : !evidence?.passages?.length ? 'Inga relevanta källavsnitt hittades i källtexten.'
         : new URL(target.uri).hash && !evidence.exact && target.source === 'sfs' ? 'Den hänvisade bestämmelsen kunde inte avgränsas.'
         : evidence?.reason;
+      if (reason) {
+        row.semantic.set(target.uri, { status: 'abstain', reason });
+        row.semanticRevision++;
+        updateReport();
+        continue;
+      }
+      ready.push({ target, evidence });
+    }
+    if (ready.length) {
       let result;
-      if (reason) result = { status: 'abstain', reason };
+      if (!row.claim.assessable) result = { status: 'abstain', reason: row.claim.reason };
       else if (failure) result = { status: 'abstain', reason: failure, retryable: true };
       else {
         setProgress(done / rows.length, `${isLocal ? 'Jämför påståenden lokalt' : 'Jämför påståenden på servern'} · hänvisning ${done + 1} av ${rows.length}`);
         try {
-          result = await assessClaim(row.claim, evidence, isLocal, signal);
+          result = await assessClaim(row.claim, ready, isLocal, signal);
           signal.throwIfAborted();
         } catch (error) {
           if (signal.aborted) throw error;
@@ -604,7 +667,10 @@ async function compareClaims(signal, retry = false) {
           result = { status: 'abstain', reason: failure, retryable: true };
         }
       }
-      row.semantic.set(target.uri, result);
+      // Every source of a joint judgment carries the same result; the first
+      // source shows it and the others point to it.
+      const joint = ready.length > 1 ? { primary: ready[0].target.uri } : undefined;
+      for (const { target } of ready) row.semantic.set(target.uri, joint ? { ...result, joint } : result);
       row.semanticRevision++;
       updateReport();
     }

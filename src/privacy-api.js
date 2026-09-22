@@ -449,6 +449,9 @@ export function artifactToMarkdown(art) {
   const anchors = {};
   const chunks = [];
   let currentLen = 0;
+  // Every node of a förarbete carries its printed page. A page runs from its
+  // first node to the first node of a later page, so nesting never matters.
+  const pageStarts = [];
 
   function appendChunk(text) {
     if (!text) return;
@@ -465,6 +468,7 @@ export function artifactToMarkdown(art) {
     const type = node.type || '';
     const id = node.id;
     const startIndex = currentLen;
+    if (typeof node.page === 'number') pageStarts.push([node.page, startIndex]);
 
     const bodyRuns = node.text || '';
     const body = inlineRunsToText(bodyRuns).trim();
@@ -535,12 +539,17 @@ export function artifactToMarkdown(art) {
     }
   }
 
-  const nodes = art.structure || art.body || art.children || [];
+  const nodes = art.structure || art.artifact?.structure || art.body || art.children || [];
   for (const node of nodes) {
     walk(node, 1);
   }
 
   const markdown = chunks.join('');
+  pageStarts.forEach(([page, start], index) => {
+    if (anchors[`sid${page}`]) return;
+    const end = pageStarts.slice(index + 1).find(([later]) => later > page)?.[1] ?? markdown.length;
+    anchors[`sid${page}`] = [start, end];
+  });
   return { markdown, anchors, title };
 }
 
@@ -673,8 +682,11 @@ export async function getDocumentSource(uri, signal, { privacyMode = false } = {
     }
   }
 
-  // 3. Fallback to direct document fetch
-  const response = await request(`document?${new URLSearchParams({ uri: rootUri, format: 'md' })}`, { signal });
+  // 3. Fallback to direct document fetch. The markdown format has no page
+  // markers, so a förarbete is fetched as a structured artifact and converted
+  // here, which yields sidN anchors for page pinpoints.
+  const paged = /^\/(?:prop|sou|ds|bet)\//.test(new URL(rootUri).pathname);
+  const response = await request(`document?${new URLSearchParams(paged ? { uri: rootUri } : { uri: rootUri, format: 'md' })}`, { signal });
   if (response && typeof response === 'object' && !response.markdown) {
     const converted = artifactToMarkdown(response);
     response.markdown = converted.markdown;

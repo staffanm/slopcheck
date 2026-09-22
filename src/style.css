@@ -82,6 +82,14 @@ textarea:focus-visible { outline-offset: -5px; }
 .document-block + .document-block { border-top: 1px solid var(--line); }
 .document-block h4 { font-size: 11px; font-weight: normal; color: var(--muted); margin: 0 0 18px; }
 .document-text { font: 17px/1.95 Georgia, 'Times New Roman', serif; white-space: pre-wrap; overflow-wrap: anywhere; }
+.document-heading, .document-paragraph, .document-item { margin: 0 0 14px; }
+.document-heading { margin-top: 28px; }
+.document-heading:first-child { margin-top: 0; }
+.document-heading .document-text { font-weight: bold; line-height: 1.4; }
+.document-heading[data-level="1"] .document-text { font-size: 22px; }
+.document-heading[data-level="2"] .document-text { font-size: 19px; }
+.document-item { padding-left: 28px; position: relative; }
+.document-item::before { content: attr(data-marker); position: absolute; left: 4px; font: 15px/2.2 Georgia, 'Times New Roman', serif; color: var(--muted); }
 .citation-mark { display: inline; font: inherit; color: inherit; text-align: inherit; white-space: inherit; overflow-wrap: anywhere; cursor: pointer; border-bottom: 2px solid; border-radius: 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; scroll-margin: 120px; }
 .citation-mark.invalid { border: 0; background: transparent; text-decoration: underline wavy #b64b31; text-underline-offset: 4px; }
 .review-aside { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; scrollbar-gutter: stable; border: 1px solid var(--line); border-radius: 5px; background: #fafbf6; }
@@ -97,7 +105,7 @@ blockquote { margin: 0; font: 15px/1.7 Georgia,serif; white-space: pre-wrap; ove
 .source-note { font-size: 12px; color: var(--muted); margin: 6px 0; }
 .source-item { border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 10px; overflow-wrap: anywhere; }
 .source-item:last-child { border: 0; margin-bottom: 0; padding-bottom: 0; }
-.source-item > a { font-weight: bold; font-size: 13px; display: block; margin: 0 0 6px; }
+.source-links { font-weight: bold; font-size: 13px; margin: 0 0 6px; }
 .source-item .badge { display: inline-block; }
 .source-item blockquote { font-size: 14px; border-left: 2px solid #aebc90; padding-left: 12px; margin-top: 15px; }
 .source-item details { margin-top: 6px; }

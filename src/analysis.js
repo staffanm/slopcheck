@@ -193,6 +193,11 @@ function words(text) {
 export function provisionText(markdown, uri, anchors) {
   const fragment = new URL(uri).hash.slice(1);
   if (!fragment) return { text: markdown, exact: false };
+  // A förarbete page: the extractor cites each page of a range separately.
+  const page = /^sid(\d+)$/.exec(fragment);
+  if (page && anchors?.[fragment]) {
+    return { text: markdown.slice(...anchors[fragment]).trim(), exact: true, page: true, label: `Visa s. ${page[1]}` };
+  }
   if (anchors && anchors[fragment]) {
     const [start, end] = anchors[fragment];
     if (typeof start === 'number' && typeof end === 'number' && end >= start) {
@@ -310,7 +315,9 @@ export function selectEvidence(markdown, uri, claim, anchors) {
   const scope = provisionText(markdown, uri, anchors);
   const plain = plainText(scope.text);
   const judgment = new URL(uri).pathname.startsWith('/dom/');
-  const paragraphs = scope.exact ? provisionUnits(plain) : sourceParagraphs(scope.text, judgment ? REPORTING_COURT[new URL(uri).pathname.split('/')[2]] : undefined);
+  // A page is read in whole paragraphs; a provision in its units.
+  const paragraphs = scope.page ? plain.split(/\n\s*\n/).map(text => text.trim()).filter(Boolean).map((text, index) => ({ text, group: 0, index }))
+    : scope.exact ? provisionUnits(plain) : sourceParagraphs(scope.text, judgment ? REPORTING_COURT[new URL(uri).pathname.split('/')[2]] : undefined);
   const terms = new Set(words(claim.hypothesis ?? claim.text));
   const quotes = [...claim.text.matchAll(/[“”"«']([^“”"»']{20,})[“”"»']/g)].map(match => normalizeQuote(match[1]));
   const ranked = (scope.exact ? paragraphs : passageChunks(paragraphs)).map(passage => {
@@ -319,8 +326,10 @@ export function selectEvidence(markdown, uri, claim, anchors) {
     return { ...passage, quote, score: [...terms].filter(term => tokens.has(term)).length / Math.sqrt(tokens.size || 1) + (quote ? 100 : 0) };
   }).sort((a, b) => b.score - a.score || a.index - b.index);
   if (!judgment) {
-    const passages = ranked.slice(0, 5);
-    return { passages, exact: scope.exact, quote: passages.some(p => p.quote) };
+    // A cited unit goes to the model whole, in document order; the model
+    // windows it itself. Only an uncited whole document is pre-selected here.
+    const passages = scope.exact ? [...ranked].sort((a, b) => a.index - b.index) : ranked.slice(0, 5);
+    return { passages, exact: scope.exact, label: scope.label, quote: passages.some(p => p.quote) };
   }
   const courts = [...new Set(paragraphs.map(p => p.court).filter(Boolean))];
   const authority = claim.authority ?? REPORTING_COURT[new URL(uri).pathname.split('/')[2]] ?? courts.at(-1);
