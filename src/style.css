@@ -28,14 +28,9 @@ button:focus-visible, [role=button]:focus-visible, a:focus-visible, summary:focu
 .site-header, main, footer { width: min(1400px, 92%); margin: auto; }
 .site-header { height: 78px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); }
 .brand { font-size: 26px; font-weight: 750; letter-spacing: -1px; display: flex; align-items: center; gap: 12px; text-decoration: none; }
-/* A blue-purple disc, sparkles on it, and a prohibition sign on top whose ring
-   follows the disc's edge. */
-.brand-mark { position: relative; width: 40px; height: 40px; line-height: 1; letter-spacing: 0; }
-.brand-mark::before { content: ""; position: absolute; left: 50%; top: 50%; width: 33px; height: 33px; transform: translate(-50%, -50%);
-  border-radius: 50%; background: radial-gradient(circle at 35% 30%, #7c9cff 0%, #5b5ce6 45%, #3d2b8f 100%); }
-.brand-mark span { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
-.brand-mark .spark { font-size: 18px; z-index: 0; }
-.brand-mark .ban { font-size: 34px; z-index: 1; }
+/* The mark is the favicon artwork: sparkles behind a prohibition sign on a
+   gradient disc. Vector, so it does not depend on the device's emoji font. */
+.brand-mark { width: 38px; height: 38px; display: block; }
 .beta { font: 10px Arial; letter-spacing: 1px; border: 1px solid #a7af94; padding: 3px 6px; border-radius: 3px; }
 .site-header nav { display: flex; gap: 30px; font-size: 12px; }
 .site-header nav a { text-decoration: none; }
