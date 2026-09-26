@@ -14,6 +14,7 @@ import numpy as np
 import onnxruntime as ort
 from transformers import AutoTokenizer
 
+from backend.integrity import verify as verify_model
 from backend.semantic import check_assessable
 from backend.windowing import source_chunks, window_premise
 
@@ -407,6 +408,9 @@ _global_classifier: Optional[ClaimClassifier] = None
 def get_model() -> ClaimClassifier:
     global _global_classifier
     if _global_classifier is None:
-        _global_classifier = ClaimClassifier()
-        _global_classifier.load()
+        classifier = ClaimClassifier()
+        # The served model must match the hashes committed in backend/model-integrity.json.
+        verify_model(classifier.model_dir)
+        classifier.load()
+        _global_classifier = classifier
     return _global_classifier

@@ -45,6 +45,13 @@ git push
 ssh ludo.tomtebo.org "cd repos/slopcheck && git pull && docker compose up -d --build"
 ```
 
+Model files are not in git. Copy a new server model directory to ludo with rsync.
+The backend serves the model that `MODEL_DIR` in `docker-compose.yml` names, and
+only when its files match `backend/model-integrity.json`. Record a model there
+after you train or calibrate it: `python -m backend.integrity models/<name>`. The
+browser model has the same check: `npm run build` compares `public/models/<version>/`
+with the hashes in `src/model-manifest.json`.
+
 The multi-stage Docker build compiles the static bundle at container build time
 and serves it via nginx on `127.0.0.1:8099`. The host nginx proxies
 `slopcheck.tomtebo.org` to it, with a certbot certificate — set up once via

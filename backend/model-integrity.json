@@ -1,0 +1,24 @@
+{
+  "classifier-kb-bert-4way-v5": {
+    "calibration.json": {
+      "bytes": 3393,
+      "sha256": "fb4f7759b459178d1a71d97d8b9291da02bd1e503a1a2797e580733813aeb226"
+    },
+    "config.json": {
+      "bytes": 962,
+      "sha256": "c8600c522ce9bac86aa48996b531617b02adecea236f382664f12e98eb2ece88"
+    },
+    "model_quantized.onnx": {
+      "bytes": 125428522,
+      "sha256": "d6bda950525885cc6c19ba21b0e9a1443d90d36a585b76ebf47dc36659e79388"
+    },
+    "tokenizer.json": {
+      "bytes": 1196141,
+      "sha256": "0d8dccaaceac1ce9d37a542a89752a6f8e84310d9ddd256d841ea589d55082ac"
+    },
+    "tokenizer_config.json": {
+      "bytes": 381,
+      "sha256": "65f7c09c9ebfc975e515171701884696776dda8ab513f6c502ecf0451e7f514c"
+    }
+  }
+}
