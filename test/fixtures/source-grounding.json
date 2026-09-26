@@ -62,7 +62,7 @@
       "expected": {"4way": "unsupported", "3way": "unsupported"},
       "phenomenon": "plausible rule attributed to unrelated provision",
       "rationale": "The source concerns late acceptance and says nothing about guarantees; lexical legal plausibility must not substitute for source support.",
-      "claim_provenance": "Exact guarantee example from test/fixtures/legal-claims.json."
+      "claim_provenance": "Exact guarantee example from test/fixtures/legal-claims.jsonl."
     },
     {
       "id": "proprieborgen-no-citation-wrong-source",
@@ -112,7 +112,7 @@
       "expected": {"4way": "supported", "3way": "supported"},
       "phenomenon": "verbatim-rule paraphrase",
       "rationale": "The claim accurately states the first paragraph's main rule.",
-      "claim_provenance": "Exact example from test/fixtures/legal-claims.json."
+      "claim_provenance": "Exact example from test/fixtures/legal-claims.jsonl."
     },
     {
       "id": "late-acceptance-wrong-source",
@@ -132,7 +132,7 @@
       "expected": {"4way": "incorrect", "3way": "incorrect"},
       "phenomenon": "direct contradiction",
       "rationale": "The source says a late answer operates as a new offer and also describes a situation where an agreement results.",
-      "claim_provenance": "Condensed variant of late-acceptance-void in test/fixtures/legal-claims.json."
+      "claim_provenance": "Condensed variant of late-acceptance-void in test/fixtures/legal-claims.jsonl."
     },
     {
       "id": "late-acceptance-always",
@@ -142,7 +142,7 @@
       "expected": {"4way": "misleading", "3way": "unsupported"},
       "phenomenon": "omitted exception",
       "rationale": "The absolute wording drops the second paragraph's exception where the sender assumes timely arrival and the recipient must realize that.",
-      "claim_provenance": "Exact example from test/fixtures/legal-claims.json."
+      "claim_provenance": "Exact example from test/fixtures/legal-claims.jsonl."
     },
     {
       "id": "late-acceptance-exception",
@@ -162,7 +162,7 @@
       "expected": {"4way": "supported", "3way": "supported"},
       "phenomenon": "close paraphrase",
       "rationale": "This is the remedy stated in the source for unfair contract terms.",
-      "claim_provenance": "Exact example from test/fixtures/legal-claims.json."
+      "claim_provenance": "Exact example from test/fixtures/legal-claims.jsonl."
     },
     {
       "id": "unfair-terms-wrong-source",
@@ -182,7 +182,7 @@
       "expected": {"4way": "incorrect", "3way": "incorrect"},
       "phenomenon": "direct contradiction",
       "rationale": "The source expressly permits adjustment of an unfair term.",
-      "claim_provenance": "Condensed variant of unfair-terms-no-adjustment in test/fixtures/legal-claims.json."
+      "claim_provenance": "Condensed variant of unfair-terms-no-adjustment in test/fixtures/legal-claims.jsonl."
     },
     {
       "id": "unfair-terms-consumers-only",
@@ -192,7 +192,7 @@
       "expected": {"4way": "misleading", "3way": "unsupported"},
       "phenomenon": "scope restriction not present in source",
       "rationale": "Consumers receive special consideration, but the first paragraph is not limited to consumers.",
-      "claim_provenance": "Exact example from test/fixtures/legal-claims.json."
+      "claim_provenance": "Exact example from test/fixtures/legal-claims.jsonl."
     },
     {
       "id": "limitation-ten-years",
@@ -202,7 +202,7 @@
       "expected": {"4way": "supported", "3way": "supported"},
       "phenomenon": "condition-preserving paraphrase",
       "rationale": "The claim accurately identifies the first paragraph as the main rule and preserves interruption as a condition.",
-      "claim_provenance": "Exact example from test/fixtures/legal-claims.json."
+      "claim_provenance": "Exact example from test/fixtures/legal-claims.jsonl."
     },
     {
       "id": "limitation-wrong-source",
@@ -222,7 +222,7 @@
       "expected": {"4way": "incorrect", "3way": "incorrect"},
       "phenomenon": "wrong number contradiction",
       "rationale": "The source states ten years as the general period and three years for the described consumer claims, not five years.",
-      "claim_provenance": "Condensed variant of limitation-five-years in test/fixtures/legal-claims.json."
+      "claim_provenance": "Condensed variant of limitation-five-years in test/fixtures/legal-claims.jsonl."
     },
     {
       "id": "limitation-all-ten-years",
@@ -232,7 +232,7 @@
       "expected": {"4way": "misleading", "3way": "unsupported"},
       "phenomenon": "omitted statutory exception",
       "rationale": "The claim turns the main rule into an absolute and denies the express three-year consumer rule.",
-      "claim_provenance": "Citation-free variant of limitation-no-consumer-rule in test/fixtures/legal-claims.json."
+      "claim_provenance": "Citation-free variant of limitation-no-consumer-rule in test/fixtures/legal-claims.jsonl."
     },
     {
       "id": "interest-eight-points",
@@ -242,7 +242,7 @@
       "expected": {"4way": "supported", "3way": "supported"},
       "phenomenon": "close paraphrase",
       "rationale": "The claim states the first sentence's ordinary calculation rule.",
-      "claim_provenance": "Exact example from test/fixtures/legal-claims.json."
+      "claim_provenance": "Exact example from test/fixtures/legal-claims.jsonl."
     },
     {
       "id": "interest-wrong-source",
@@ -262,7 +262,7 @@
       "expected": {"4way": "incorrect", "3way": "incorrect"},
       "phenomenon": "wrong number contradiction",
       "rationale": "The source specifies eight percentage points in the ordinary case and two in its exception, never twelve.",
-      "claim_provenance": "Condensed variant of interest-twelve-points-verb in test/fixtures/legal-claims.json."
+      "claim_provenance": "Condensed variant of interest-twelve-points-verb in test/fixtures/legal-claims.jsonl."
     },
     {
       "id": "interest-always-eight",
@@ -272,7 +272,7 @@
       "expected": {"4way": "misleading", "3way": "unsupported"},
       "phenomenon": "omitted exception",
       "rationale": "The source provides a temporary two-point exception for a specified personal-injury damages calculation.",
-      "claim_provenance": "Authored diagnostic based on interest-two-points in test/fixtures/legal-claims.json."
+      "claim_provenance": "Authored diagnostic based on interest-two-points in test/fixtures/legal-claims.jsonl."
     },
     {
       "id": "complaint-two-years",
@@ -282,7 +282,7 @@
       "expected": {"4way": "supported", "3way": "supported"},
       "phenomenon": "condition-preserving paraphrase",
       "rationale": "The claim retains the two-year limit and the guarantee exception.",
-      "claim_provenance": "Exact example from test/fixtures/legal-claims.json."
+      "claim_provenance": "Exact example from test/fixtures/legal-claims.jsonl."
     },
     {
       "id": "complaint-wrong-source",
@@ -302,7 +302,7 @@
       "expected": {"4way": "incorrect", "3way": "incorrect"},
       "phenomenon": "wrong number contradiction",
       "rationale": "The source gives an ultimate two-year period, subject to guarantee or similar undertaking, not three years.",
-      "claim_provenance": "Condensed variant of complaint-three-years in test/fixtures/legal-claims.json."
+      "claim_provenance": "Condensed variant of complaint-three-years in test/fixtures/legal-claims.jsonl."
     },
     {
       "id": "complaint-no-reasonable-time",
@@ -312,7 +312,7 @@
       "expected": {"4way": "misleading", "3way": "unsupported"},
       "phenomenon": "omitted cumulative condition",
       "rationale": "The two-year outer limit does not displace the first paragraph's reasonable-time requirement.",
-      "claim_provenance": "Citation-free variant of complaint-no-reasonable-time in test/fixtures/legal-claims.json."
+      "claim_provenance": "Citation-free variant of complaint-no-reasonable-time in test/fixtures/legal-claims.jsonl."
     },
     {
       "id": "costs-loser-pays",
@@ -322,7 +322,7 @@
       "expected": {"4way": "supported", "3way": "supported"},
       "phenomenon": "condition-preserving paraphrase",
       "rationale": "The claim states both the loser-pays rule and its express reservation.",
-      "claim_provenance": "Exact example from test/fixtures/legal-claims.json."
+      "claim_provenance": "Exact example from test/fixtures/legal-claims.jsonl."
     },
     {
       "id": "costs-each-own",
@@ -332,7 +332,7 @@
       "expected": {"4way": "incorrect", "3way": "incorrect"},
       "phenomenon": "direct contradiction",
       "rationale": "The source's default is that the losing party pays the opposing party's costs.",
-      "claim_provenance": "Exact example from test/fixtures/legal-claims.json."
+      "claim_provenance": "Exact example from test/fixtures/legal-claims.jsonl."
     },
     {
       "id": "costs-no-exception",
@@ -342,7 +342,7 @@
       "expected": {"4way": "misleading", "3way": "unsupported"},
       "phenomenon": "omitted exception",
       "rationale": "The claim drops the provision's express reservation 'om ej annat är stadgat'.",
-      "claim_provenance": "Exact example from test/fixtures/legal-claims.json."
+      "claim_provenance": "Exact example from test/fixtures/legal-claims.jsonl."
     }
   ]
 }

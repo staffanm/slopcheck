@@ -1,22 +1,19 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import cases from './fixtures/legal-claims.json' with { type: 'json' };
+import { readLegalClaims } from './legal-fixture.js';
 import { claimContext, selectEvidence, plainText } from '../src/analysis.js';
 import { semanticClaim, semanticResult } from '../src/semantic.js';
 
 // The policy tests pin the provisional thresholds; the shipped manifest may disable labels.
 const PROVISIONAL = { supported: 0.97, contradiction: 0.97, neutral: 0.90, conflict: 0.50 };
 
-const KINDS = ['correct', 'misleading', 'incorrect', 'nonsensical', 'missing'];
+const cases = readLegalClaims();
+const LABELS = ['supported', 'misleading', 'incorrect', 'nonsensical', 'unsupported'];
+const uri = item => item.sources[0].uri;
 
 function input(item) {
-  const start = item.text.indexOf(item.citation);
-  const occurrence = { text: item.citation, locations: [{ block_id: 'text', start, end: start + item.citation.length }] };
-  const blocks = [{ id: 'text', text: item.text }];
-  const claim = semanticClaim(occurrence, claimContext(occurrence, blocks), blocks);
-  const markdown = readFileSync(new URL(`./fixtures/legal-sources/${item.file}`, import.meta.url), 'utf8');
-  return { claim, markdown, evidence: selectEvidence(markdown, item.uri, claim) };
+  const claim = semanticClaim(item.occurrence, claimContext(item.occurrence, item.blocks), item.blocks);
+  return { claim, markdown: item.markdown, evidence: selectEvidence(item.markdown, uri(item), claim) };
 }
 
 test('a provision-relative claim keeps the complete guarantee assertion and both source paragraphs', () => {
@@ -24,7 +21,7 @@ test('a provision-relative claim keeps the complete guarantee assertion and both
   assert.equal(claim.assessable, true);
   assert.match(claim.hypothesis, /^när en person åtar sig/);
   assert.match(claim.hypothesis, /'som för egen skuld'.*direkt från borgensmannen\.$/);
-  assert.equal(claim.text, cases[0].text);
+  assert.equal(claim.text, cases[0].claim);
   assert.doesNotMatch(claim.hypothesis, /Detta följer|avtalslagen/);
   assert.equal(evidence.passages.length, 2);
   assert.equal(evidence.passages.toSorted((a, b) => a.index - b.index).map(p => p.text).join('\n\n'), plainText(markdown));
@@ -47,11 +44,11 @@ test('HD attribution selects its own summary and decision, excluding lower court
 test('identical lower-court text cannot support a claim attributed to HD', () => {
   const claim = { text: 'Avtalet är giltigt och parterna ska fullgöra det.', authority: 'högsta domstolen', requireConclusion: true };
   const markdown = `## Tingsrätten\n\n## Domslut\n\n${claim.text}\n\n## Högsta domstolen\n\n## Bakgrund\n\n${claim.text}\n\n## Skäl\n\nKäranden anförde att ${claim.text}\n\n## Beslut\n\nAvtalet är ogiltigt och ingen part ska fullgöra det.`;
-  const evidence = selectEvidence(markdown, cases[1].uri, claim);
+  const evidence = selectEvidence(markdown, uri(cases[1]), claim);
   assert.equal(evidence.passages.length, 1);
   assert.equal(evidence.passages[0].role, 'decision');
   assert.doesNotMatch(evidence.passages[0].text, /Avtalet är giltigt/);
-  assert.equal(selectEvidence(claim.text, cases[1].uri, claim).passages.length, 0);
+  assert.equal(selectEvidence(claim.text, uri(cases[1]), claim).passages.length, 0);
   const yes = { scores: { entailment: .99, neutral: .005, contradiction: .005 } };
   assert.equal(semanticResult([{ ...yes, role: 'reasoning' }], { ...evidence, thresholds: PROVISIONAL }).status, 'abstain');
   assert.equal(semanticResult([{ ...yes, role: 'decision' }], { ...evidence, thresholds: PROVISIONAL }).status, 'correct');
@@ -64,16 +61,16 @@ test('source passages preserve long sentences instead of cutting off their condi
   assert.equal(evidence.passages[0].text, text);
 });
 
-test('every corpus claim has a kind, a frozen source, and a hypothesis without the citation', () => {
+test('every corpus claim has a label, a frozen source, and a hypothesis without the citation', () => {
   assert.ok(cases.length >= 60);
   assert.equal(new Set(cases.map(item => item.id)).size, cases.length);
-  for (const kind of KINDS) assert.ok(cases.filter(item => item.kind === kind).length >= (kind === 'missing' ? 1 : 5), kind);
+  for (const label of LABELS) assert.ok(cases.filter(item => item.label === label).length >= (label === 'unsupported' ? 1 : 5), label);
   for (const item of cases) {
-    assert.ok(KINDS.includes(item.kind), item.id);
-    assert.ok(item.text.includes(item.citation), item.id);
+    assert.ok(LABELS.includes(item.label), item.id);
+    assert.ok(item.claim.includes(item.sources[0].citation), item.id);
     const { claim } = input(item);
     assert.doesNotMatch(claim.hypothesis, /CITATION/, item.id);
-    assert.equal(claim.hypothesis.includes(item.citation), false, item.id);
+    assert.equal(claim.hypothesis.includes(item.sources[0].citation), false, item.id);
     if (item.known_gap) continue;
     assert.equal(claim.assessable, item.assessable !== false, `${item.id}: ${claim.reason}`);
   }
@@ -82,15 +79,15 @@ test('every corpus claim has a kind, a frozen source, and a hypothesis without t
 test('provision claims select the exact provision; judgment claims select the attributed court', () => {
   for (const item of cases.filter(item => !item.known_gap)) {
     const { claim, markdown, evidence } = input(item);
-    if (!new URL(item.uri).pathname.startsWith('/dom/')) {
+    if (!new URL(uri(item)).pathname.startsWith('/dom/')) {
       assert.equal(evidence.exact, true, item.id);
       assert.ok(evidence.passages.length >= 1 && evidence.passages.length <= 5, item.id);
       assert.ok(evidence.passages.every(p => plainText(markdown).includes(p.text)), item.id);
-      assert.ok(evidence.passages.some(p => new RegExp(`^${new URL(item.uri).hash.replace(/^#(?:K\d+[a-z]?)?P/, '')} §`).test(p.text)), item.id);
+      assert.ok(evidence.passages.some(p => new RegExp(`^${new URL(uri(item)).hash.replace(/^#(?:K\d+[a-z]?)?P/, '')} §`).test(p.text)), item.id);
       continue;
     }
     assert.ok(evidence.passages.length > 0, item.id);
-    assert.equal(evidence.authority, claim.authority ?? (item.uri.includes('/dom/hfd/') ? 'högsta förvaltningsdomstolen' : 'högsta domstolen'), item.id);
+    assert.equal(evidence.authority, claim.authority ?? (uri(item).includes('/dom/hfd/') ? 'högsta förvaltningsdomstolen' : 'högsta domstolen'), item.id);
     assert.ok(evidence.passages.every(p => p.court === evidence.authority), item.id);
     assert.ok(evidence.passages.some(p => p.role === 'decision'), item.id);
     assert.equal(claim.requireConclusion, Boolean(claim.authority), item.id);

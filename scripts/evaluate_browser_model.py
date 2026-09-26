@@ -13,7 +13,6 @@ Run: python scripts/evaluate_browser_model.py --version scandi-nli-small-legal-v
 
 import argparse
 import json
-import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -24,6 +23,7 @@ from transformers import AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend.windowing import window_premise  # noqa: E402
+from legal_fixture import load_legal_claims  # noqa: E402
 
 LABELS = ["entailment", "neutral", "contradiction"]
 FOUR_TO_THREE = {"supported": "entailment", "unsupported": "neutral", "incorrect": "contradiction", "misleading": "neutral"}
@@ -57,14 +57,6 @@ def decide(probs: np.ndarray) -> tuple[str, str | None]:
 def read_jsonl(path: Path) -> list[dict]:
     with path.open(encoding="utf-8") as handle:
         return [json.loads(line) for line in handle if line.strip()]
-
-
-def fixture_source_text(path: Path) -> str:
-    text = path.read_text(encoding="utf-8")
-    if path.name.startswith(("nja", "hfd")):
-        match = re.search(r"##\s+(?:Högsta\s+domstolen|Högsta\s+förvaltningsdomstolen)", text)
-        return (text[match.start():] if match else text).strip()
-    return text.strip()
 
 
 def run_examples(model: BrowserModel, examples: list[dict], name: str) -> dict:
@@ -161,14 +153,10 @@ def main() -> None:
     grounding_report = run_examples(model, examples, "source-grounding")
 
     print("Legal-claims fixture:")
-    kind_allowed = {"correct": {"entailment"}, "missing": {"neutral"}, "incorrect": {"contradiction", "neutral"}, "misleading": {"neutral", "contradiction"}}
-    examples = []
-    for claim in json.loads(Path("test/fixtures/legal-claims.json").read_text(encoding="utf-8")):
-        if claim["kind"] not in kind_allowed:
-            continue
-        examples.append({"id": claim["id"], "claim": claim["text"], "allowed": kind_allowed[claim["kind"]],
-                         "source": {"citation": claim["citation"], "text": fixture_source_text(Path("test/fixtures/legal-sources") / claim["file"]),
-                                    "unit_type": "case_judgment" if claim["file"].startswith(("nja", "hfd")) else "statute_provision"}})
+    # Three-way labels that do not point the reader the wrong way.
+    label_allowed = {"supported": {"entailment"}, "unsupported": {"neutral"}, "incorrect": {"contradiction", "neutral"}, "misleading": {"neutral", "contradiction"}}
+    examples = [{"id": row["id"], "claim": row["claim"], "allowed": label_allowed[row["label"]], "source": row["sources"][0]}
+                for row in load_legal_claims() if row["label"] in label_allowed]
     fixture_report = run_examples(model, examples, "legal-claims")
 
     if args.report:

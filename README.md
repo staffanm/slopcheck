@@ -203,7 +203,7 @@ The plan is a slopcheck-specific inference service, not a lagen.nu API:
 1. **Model.** [mDeBERTa-v3-base-xnli-multilingual-nli-2mil7](https://huggingface.co/MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7),
    exported to ONNX with int8 weights the same way `scripts/export-model.py` exports the small model.
    About 86M encoder parameters and a 190M-parameter embedding table; about 600 MB resident in int8.
-   Evaluate it on `test/fixtures/legal-claims.json` before anything else. If it does not beat the
+   Evaluate it on `test/fixtures/legal-claims.jsonl` before anything else. If it does not beat the
    small model on that fixture, stop here.
 2. **Service.** One container on ludo.tomtebo.org beside the static site, `slopcheck-nli`, running
    ONNX Runtime on CPU. One endpoint, `POST /nli`, that takes a list of premise/hypothesis pairs and

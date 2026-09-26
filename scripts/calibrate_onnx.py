@@ -12,7 +12,7 @@ Steps:
   2. writes <model-dir>/calibration.json, which the server loads at start
   3. data/test.jsonl: argmax metrics and the selective policy, by unit type
      and by family origin
-  4. test/fixtures/source-grounding.json and test/fixtures/legal-claims.json:
+  4. test/fixtures/source-grounding.json and test/fixtures/legal-claims.jsonl:
      argmax and accepted-label results, never used for selection
   5. writes <model-dir>/evaluation_report.json
 
@@ -21,7 +21,6 @@ Run: python scripts/calibrate_onnx.py --model-dir models/classifier-kb-bert-4way
 
 import argparse
 import json
-import re
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -33,9 +32,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend.calibration import select_fail_closed_thresholds, selective_metrics  # noqa: E402
 from backend.model import ID2LABEL, ClaimClassifier  # noqa: E402
 from backend.semantic import check_assessable  # noqa: E402
+from legal_fixture import load_legal_claims  # noqa: E402
 
 CLASSES = [ID2LABEL[i] for i in range(4)]
-FIXTURE_KIND = {"correct": "supported", "missing": "unsupported", "incorrect": "incorrect", "misleading": "misleading"}
 
 
 def softmax(logits: np.ndarray, temperature: float) -> np.ndarray:
@@ -110,14 +109,6 @@ def score_rows(classifier: ClaimClassifier, rows: list[dict]) -> tuple[np.ndarra
 def read_jsonl(path: Path) -> list[dict]:
     with path.open(encoding="utf-8") as handle:
         return [json.loads(line) for line in handle if line.strip()]
-
-
-def fixture_source_text(path: Path) -> tuple[str, str]:
-    text = path.read_text(encoding="utf-8")
-    if path.name.startswith(("nja", "hfd")):
-        match = re.search(r"##\s+(?:Högsta\s+domstolen|Högsta\s+förvaltningsdomstolen)", text)
-        return (text[match.start():] if match else text).strip(), "case_judgment"
-    return text.strip(), "statute_provision"
 
 
 def run_examples(classifier: ClaimClassifier, examples: list[dict], name: str) -> dict:
@@ -262,10 +253,10 @@ def main() -> None:
 
     print("Legal-claims fixture:")
     examples = []
-    for claim in json.loads(Path("test/fixtures/legal-claims.json").read_text(encoding="utf-8")):
-        text, unit_type = fixture_source_text(Path("test/fixtures/legal-sources") / claim["file"])
-        examples.append({"id": claim["id"], "claim": claim["text"], "expected": FIXTURE_KIND.get(claim["kind"]),
-                         "source": {"citation": claim["citation"], "text": text, "unit_type": unit_type}})
+    for row in load_legal_claims():
+        # "nonsensical" rows have no model label; they are run but not scored.
+        examples.append({"id": row["id"], "claim": row["claim"], "expected": row["label"] if row["label"] in CLASSES else None,
+                         "source": row["sources"][0]})
     fixture_report = run_examples(classifier, examples, "legal-claims")
 
     report = {

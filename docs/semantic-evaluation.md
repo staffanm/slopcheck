@@ -70,17 +70,20 @@ The browser tries WebGPU and recovers locally through WASM if GPU initialization
 
 ## Corpus claims about statutes and judgments
 
-The [legal fixtures](../test/fixtures/legal-claims.json) hold 70 claims against 14 real source texts
+The [legal fixtures](../test/fixtures/legal-claims.jsonl) hold 70 claims against 14 real source texts
 from the lagen.nu corpus: nine statute provisions and five judgments.
 [Source provenance](../test/fixtures/legal-sources/README.md) records their origin.
-Each claim carries a `kind`:
+Each row has the pair format of `data/*.jsonl` (`id`, `claim`, `label`, `sources`), with the
+source text in a markdown file that `sources[].file` names. `scripts/legal_fixture.py` and
+`test/legal-fixture.js` read it. Each claim carries a `label`:
 
-| Kind | Claims | Meaning | Example |
+| Label | Claims | Meaning | Example |
 |---|---:|---|---|
-| correct | 24 | the source says this | 18 kap. 1 § RB: the losing party pays the other side's costs, om inte annat är stadgat |
+| supported | 24 | the source says this | 18 kap. 1 § RB: the losing party pays the other side's costs, om inte annat är stadgat |
 | misleading | 13 | true in part; a condition, exception or scope is dropped or widened | 2 § preskriptionslagen: “alla fordringar tio år”, denying the three-year consumer rule |
-| incorrect | 25 | a wrong number, a reversed outcome, the opposite rule, a true rule attributed to the wrong source, or a holding attributed to a court that did not make it | NJA 2005 s. 805: “pastorn ska dömas … till fängelse” (HD acquitted) |
-| nonsensical | 8 | a category error, word salad, a citation list, or keywords without a verb | “3 kap. 1 § brottsbalken slog fast att hovrätten är ett mord” |
+| incorrect | 24 | a wrong number, a reversed outcome, the opposite rule, a true rule attributed to the wrong source, or a holding attributed to a court that did not make it | NJA 2005 s. 805: “pastorn ska dömas … till fängelse” (HD acquitted) |
+| unsupported | 1 | a rule the source does not state, attributed to it | 4 § avtalslagen cited for proprieborgen |
+| nonsensical | 8 | a category error, word salad, a citation list, or keywords without a verb; not a model label, the claim rules must reject it | “3 kap. 1 § brottsbalken slog fast att hovrätten är ett mord” |
 
 Eight claims exist in two wordings, the second with the `-verb` suffix. The first run of the
 fixture found the natural wording unassessable because the claim verb list lacked `preskriberas`,

@@ -57,7 +57,7 @@ source supports it, claim is narrower   → supported
 
 `nonsensical` is not a model class. The existing deterministic rules in `backend/semantic.py` (`check_assessable`) keep producing it for empty claims, claims without a verb, unreadable text and category errors. Do not generate `nonsensical` training rows.
 
-The 70 claims in `test/fixtures/legal-claims.json` carry a `defect` field for every non-correct claim. Those descriptions are the reference for how the labels are meant to split. Check every generation rule against them before generating at scale.
+The 70 claims in `test/fixtures/legal-claims.jsonl` carry a `defect` field for every non-correct claim. Those descriptions are the reference for how the labels are meant to split. Check every generation rule against them before generating at scale.
 
 ---
 
@@ -222,7 +222,7 @@ Use a union-find over the two keys and assign whole components to partitions. Do
 
 Generalization to authorities never seen in training is a separate question. Build a small "unseen source document" evaluation set by holding out a handful of whole judgments and acts as sources, and report it alongside the main test partition. It does not dictate the primary split.
 
-The 70 human-authored claims in `test/fixtures/legal-claims.json` with the frozen sources in `test/fixtures/legal-sources/` are the independent test set. They are never used for training, threshold selection or model selection. Their sources are resolved under section 3 (deciding court's `domskal` and `domslut` only for judgments, no headnote) before scoring. Their labels map as `correct → supported`, `missing → unsupported`; `nonsensical` rows test the harness rules, not the model.
+The 70 human-authored claims in `test/fixtures/legal-claims.jsonl` with the frozen sources in `test/fixtures/legal-sources/` are the independent test set. They are never used for training, threshold selection or model selection. Their sources are resolved under section 3 (deciding court's `domskal` and `domslut` only for judgments, no headnote) before scoring. They use the pair format and label names of `data/*.jsonl`; the one extra label, `nonsensical`, marks rows that test the harness rules, not the model.
 
 Before training, produce dataset statistics and check automatically for empty claims or sources, invalid labels, duplicates across partitions, orphaned counterfactual rows, self-citations, lower-instance text inside a source, and token lengths above 8192. Manually review random samples per (label, transformation) pair, especially `unsupported/adjacent`, `unsupported/same-nyckelord`, `incorrect/number`, `incorrect/negation`, `misleading/exception-removed`, `misleading/modality` and `supported/paraphrase`.
 

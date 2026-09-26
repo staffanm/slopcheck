@@ -2,7 +2,7 @@
 // Vite app in Chromium, the semantic worker, onnxruntime-web and the JS
 // tokenizer. The model is the one src/model-manifest.json names.
 //
-// 1. test/fixtures/legal-claims.json: claim extraction, evidence selection and
+// 1. test/fixtures/legal-claims.jsonl: claim extraction, evidence selection and
 //    the label policy, as in test/semantic.browser.js.
 // 2. The audited test partition: each source split into paragraphs, one
 //    assessment per row, three-way (misleading counts as neutral).
@@ -13,6 +13,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { chromium } from '@playwright/test';
 import { createServer } from 'vite';
+import { readLegalClaims } from '../test/legal-fixture.js';
 
 const { values: args } = parseArgs({ options: {
   out: { type: 'string' }, 'test-data': { type: 'string', default: 'data/test.audited.jsonl' }, limit: { type: 'string' },
@@ -22,11 +23,11 @@ const manifest = JSON.parse(await readFile(new URL('src/model-manifest.json', ro
 
 // A label is wrong when it points the reader the wrong way; see test/semantic.browser.js.
 const FORBIDDEN = {
-  correct: ['contradiction', 'incorrect', 'misleading', 'missing'],
+  supported: ['contradiction', 'incorrect', 'misleading', 'missing'],
   misleading: ['supported', 'correct'],
   incorrect: ['supported', 'correct'],
   nonsensical: ['supported', 'correct', 'contradiction', 'incorrect'],
-  missing: ['supported', 'correct'],
+  unsupported: ['supported', 'correct'],
 };
 const THREE_WAY = { supported: 'entailment', unsupported: 'neutral', incorrect: 'contradiction', misleading: 'neutral' };
 const STATUS_TO_THREE = { correct: 'entailment', supported: 'entailment', missing: 'neutral', incorrect: 'contradiction', contradiction: 'contradiction' };
@@ -37,9 +38,8 @@ const browser = await chromium.launch();
 const page = await browser.newPage();
 await page.goto('http://localhost:5190/');
 
-const legalCases = JSON.parse(await readFile(new URL('test/fixtures/legal-claims.json', root), 'utf8'));
-const inputs = await Promise.all(legalCases.map(async item => ({ ...item,
-  markdown: await readFile(new URL(`test/fixtures/legal-sources/${item.file}`, root), 'utf8') })));
+const inputs = readLegalClaims().map(({ id, label, markdown, occurrence, blocks, sources }) =>
+  ({ id, label, markdown, occurrence, blocks, uri: sources[0].uri }));
 const legal = await page.evaluate(async inputs => {
   const { claimContext, selectEvidence } = await import('/src/analysis.js');
   const { semanticClaim } = await import('/src/semantic.js');
@@ -47,14 +47,11 @@ const legal = await page.evaluate(async inputs => {
   const client = semanticClient(() => {});
   const results = [];
   for (const item of inputs) {
-    const start = item.text.indexOf(item.citation);
-    const occurrence = { text: item.citation, locations: [{ block_id: 'text', start, end: start + item.citation.length }] };
-    const blocks = [{ id: 'text', text: item.text }];
-    const claim = semanticClaim(occurrence, claimContext(occurrence, blocks), blocks);
+    const claim = semanticClaim(item.occurrence, claimContext(item.occurrence, item.blocks), item.blocks);
     const evidence = selectEvidence(item.markdown, item.uri, claim);
     const began = performance.now();
     const result = claim.assessable ? await client.assess(claim, evidence, new AbortController().signal) : { status: 'unassessable', comparisons: [] };
-    results.push({ id: item.id, kind: item.kind, status: result.status, backend: result.backend, ms: performance.now() - began,
+    results.push({ id: item.id, label: item.label, status: result.status, backend: result.backend, ms: performance.now() - began,
       scores: result.comparisons?.[0]?.scores });
   }
   client.stop();
@@ -103,7 +100,7 @@ const summary = {
   legal_claims: {
     assessed: assessedLegal.length,
     substantive: assessedLegal.filter(item => item.status !== 'abstain').length,
-    wrong: assessedLegal.filter(item => FORBIDDEN[item.kind]?.includes(item.status)).length,
+    wrong: assessedLegal.filter(item => FORBIDDEN[item.label]?.includes(item.status)).length,
     median_ms: Math.round(median(assessedLegal.map(item => item.ms))),
   },
   test_partition: {

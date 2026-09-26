@@ -242,7 +242,7 @@ def main():
     parser.add_argument("--model-dir", type=str, default="models/classifier-mmbert-small-4way")
     parser.add_argument("--test-data", type=str, default="data/test.jsonl")
     parser.add_argument("--cal-data", type=str, default="data/calibration.jsonl")
-    parser.add_argument("--fixtures-claims", type=str, default="test/fixtures/legal-claims.json")
+    parser.add_argument("--fixtures-claims", type=str, default="test/fixtures/legal-claims.jsonl")
     parser.add_argument("--fixtures-sources", type=str, default="test/fixtures/legal-sources")
     parser.add_argument("--minimum-calibration-accepted", type=int, default=30,
                         help="Minimum accepted calibration predictions required to enable a class.")
@@ -416,7 +416,7 @@ def main():
     print(" 4. INDEPENDENT 70-CLAIM FIXTURE EVALUATION")
     print("=======================================================")
     with open(args.fixtures_claims, "r", encoding="utf-8") as f:
-        fixtures = json.load(f)
+        fixtures = [json.loads(line) for line in f if line.strip()]
     print(f"Loaded {len(fixtures)} fixture claims.")
 
     fixtures_sources_dir = Path(args.fixtures_sources)
@@ -427,8 +427,8 @@ def main():
 
     fixture_eval_rows = []
     for item in fixtures:
-        claim_text = item["text"]
-        kind = item["kind"]
+        claim_text = item["claim"]
+        label = item["label"]
 
         # Step A: Structural harness check
         assessable, reason = check_assessable(claim_text)
@@ -437,16 +437,16 @@ def main():
             abstain_reasons[f"unassessable_{reason}"] = abstain_reasons.get(f"unassessable_{reason}", 0) + 1
             fixture_eval_rows.append({
                 "id": item["id"],
-                "kind": kind,
+                "label": label,
                 "status": "nonsensical",
                 "pred": "nonsensical",
                 "abstain_reason": reason,
-                "correct": (kind == "nonsensical")
+                "correct": (label == "nonsensical")
             })
             continue
 
         # Step B: Source resolution under Section 3
-        source_file = fixtures_sources_dir / item["file"]
+        source_file = fixtures_sources_dir / item["sources"][0]["file"]
         if not source_file.exists():
             harness_abstain += 1
             abstain_reasons["missing_source_file"] = abstain_reasons.get("missing_source_file", 0) + 1
@@ -460,7 +460,7 @@ def main():
         # BM25 paragraph windowing
         windowed_source_text = window_premise(
             claim_text,
-            [{"citation": item.get("file", ""), "text": source_unit_text}],
+            [{"citation": item["sources"][0]["citation"], "text": source_unit_text}],
             max_premise_tokens=380,
             tokenizer=evaluator.tokenizer
         )
@@ -473,7 +473,7 @@ def main():
             abstain_reasons["unit_too_long"] = abstain_reasons.get("unit_too_long", 0) + 1
             fixture_eval_rows.append({
                 "id": item["id"],
-                "kind": kind,
+                "label": label,
                 "status": "abstain",
                 "pred": "abstain",
                 "abstain_reason": "unit_too_long",
@@ -500,7 +500,7 @@ def main():
             abstain_reasons[r_code] = abstain_reasons.get(r_code, 0) + 1
             fixture_eval_rows.append({
                 "id": item["id"],
-                "kind": kind,
+                "label": label,
                 "status": "abstain",
                 "pred": pred_label,
                 "p1": p1,
@@ -512,18 +512,15 @@ def main():
 
         # Accepted prediction
         harness_accepted += 1
-        # Map label to fixture kind
-        mapped_kind = "correct" if pred_label == "supported" else ("missing" if pred_label == "unsupported" else pred_label)
-        is_match = (mapped_kind == kind)
+        is_match = (pred_label == label)
         if is_match:
             harness_correct += 1
 
         fixture_eval_rows.append({
             "id": item["id"],
-            "kind": kind,
+            "label": label,
             "status": "accepted",
             "pred": pred_label,
-            "mapped_pred": mapped_kind,
             "p1": p1,
             "margin": margin,
             "correct": is_match

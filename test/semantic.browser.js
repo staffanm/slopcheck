@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import cases from './fixtures/semantic-cases.json' with { type: 'json' };
-import { readFile, writeFile } from 'node:fs/promises';
-import legalCases from './fixtures/legal-claims.json' with { type: 'json' };
+import { writeFile } from 'node:fs/promises';
+import { readLegalClaims } from './legal-fixture.js';
 
 test('real model: Swedish evaluation, asset cache, and local-only inference', async ({ page }, testInfo) => {
   test.setTimeout(180000);
@@ -64,18 +64,18 @@ test('real model: Swedish evaluation, asset cache, and local-only inference', as
 // must never read as contradicted or unsupported; a misleading, incorrect or
 // nonsensical claim must never read as supported. Abstention is always allowed.
 const FORBIDDEN = {
-  correct: ['contradiction', 'incorrect', 'misleading', 'missing'],
+  supported: ['contradiction', 'incorrect', 'misleading', 'missing'],
   misleading: ['supported', 'correct'],
   incorrect: ['supported', 'correct'],
   nonsensical: ['supported', 'correct', 'contradiction', 'incorrect'],
-  missing: ['supported', 'correct'],
+  unsupported: ['supported', 'correct'],
 };
 
 test('real model: corpus claims about statutes and judgments never receive a wrong label', async ({ page }, testInfo) => {
   test.setTimeout(600000);
-  const inputs = await Promise.all(legalCases.map(async item => ({ ...item,
-    markdown: await readFile(new URL(`./fixtures/legal-sources/${item.file}`, import.meta.url), 'utf8'),
-  })));
+  const legalCases = readLegalClaims();
+  const inputs = legalCases.map(({ id, label, defect, known_gap, markdown, occurrence, blocks, sources }) =>
+    ({ id, label, defect, known_gap, markdown, occurrence, blocks, uri: sources[0].uri }));
   await page.goto('/');
   const results = await page.evaluate(async inputs => {
     const { claimContext, selectEvidence } = await import('/src/analysis.js');
@@ -84,14 +84,11 @@ test('real model: corpus claims about statutes and judgments never receive a wro
     const client = semanticClient(() => {});
     const results = [];
     for (const item of inputs) {
-      const start = item.text.indexOf(item.citation);
-      const occurrence = { text: item.citation, locations: [{ block_id: 'text', start, end: start + item.citation.length }] };
-      const blocks = [{ id: 'text', text: item.text }];
-      const claim = semanticClaim(occurrence, claimContext(occurrence, blocks), blocks);
+      const claim = semanticClaim(item.occurrence, claimContext(item.occurrence, item.blocks), item.blocks);
       const evidence = selectEvidence(item.markdown, item.uri, claim);
       const began = performance.now();
       const result = claim.assessable ? await client.assess(claim, evidence, new AbortController().signal) : { status: 'unassessable', reason: claim.reason, comparisons: [] };
-      results.push({ id: item.id, kind: item.kind, defect: item.defect, known_gap: item.known_gap, ms: performance.now() - began, claim, evidence, result });
+      results.push({ id: item.id, label: item.label, defect: item.defect, known_gap: item.known_gap, ms: performance.now() - began, claim, evidence, result });
     }
     client.stop();
     return results;
@@ -99,8 +96,8 @@ test('real model: corpus claims about statutes and judgments never receive a wro
   await testInfo.attach('legal-claim-results.json', { body: JSON.stringify(results, null, 2), contentType: 'application/json' });
   await writeFile(testInfo.outputPath('legal-claim-results.json'), JSON.stringify(results, null, 2) + '\n');
   expect(results).toHaveLength(legalCases.length);
-  for (const { id, kind, result } of results) {
-    expect(FORBIDDEN[kind], `${id}: ${result.status} (${result.reason})`).not.toContain(result.status);
+  for (const { id, label, result } of results) {
+    expect(FORBIDDEN[label], `${id}: ${result.status} (${result.reason})`).not.toContain(result.status);
     expect(result.reason, id).not.toContain('sammanhang som inte kunde avgränsas');
   }
   // The two originally reported claims keep their attribution behaviour.

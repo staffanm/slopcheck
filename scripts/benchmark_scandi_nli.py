@@ -2,8 +2,7 @@
 """
 Benchmark the privacy mode model (alexandrainst/scandi-nli-small) on:
 1. data/test.jsonl (565 legal claim pairs)
-2. test/fixtures/legal-claims.json (70 legal claims with exact passage extraction)
-3. Latency benchmark across sequence lengths.
+2. Latency benchmark across sequence lengths.
 """
 
 import json
@@ -17,7 +16,6 @@ ROOT = Path(__file__).resolve().parents[1]
 MODEL_DIR = ROOT / "public" / "models" / "scandi-nli-small-5c7d1ee-q8-v1"
 ONNX_PATH = MODEL_DIR / "model.onnx"
 TEST_JSONL = ROOT / "data" / "test.jsonl"
-LEGAL_CLAIMS_JSON = ROOT / "test" / "fixtures" / "legal-claims.json"
 
 def evaluate_test_jsonl():
     print("=" * 60)

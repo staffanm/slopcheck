@@ -25,6 +25,6 @@ selector keys on.
 The statute fixtures preserve the exceptions and reservations the misleading
 claims drop. The judgment fixtures preserve lower-court reasoning, the
 reporting court's reasoning, its summary where one exists, and its decision.
-`../legal-claims.json` states 70 claims against these texts, each tagged
-correct, misleading, incorrect or nonsensical.
+`../legal-claims.jsonl` states 70 claims against these texts, in the pair format of
+`data/*.jsonl`, each labelled supported, unsupported, misleading, incorrect or nonsensical.
 These fixtures test software behavior. They are not an independent evaluation of legal accuracy.
