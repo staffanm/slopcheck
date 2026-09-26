@@ -728,7 +728,7 @@ function updatePrivacyNote() {
   if (isLocal) {
     note.innerHTML = '<span aria-hidden="true">🔒</span> <strong>Integritetsläge.</strong> Dokumentet och dina hänvisningar stannar på din enhet. Jämförelsen körs av en lokal modell i webbläsaren, som hämtar cirka 25 MB modellfiler första gången. <a href="./sa-funkar-det.html">Så funkar det</a>.';
   } else {
-    note.innerHTML = '<span aria-hidden="true">↳</span> <strong>Normalläge.</strong> Texten skickas till lagen.nu för att hitta hänvisningar. Påståenden och utvalda källavsnitt jämförs på slopchecks server. Inget sparas. <a href="./sa-funkar-det.html">Så funkar det</a>.';
+    note.innerHTML = '<span aria-hidden="true">↳</span> <strong>Normalläge.</strong> Texten skickas till lagen.nu för att hitta hänvisningar. Påståenden och utvalda källavsnitt jämförs på Slopchecks server. Inget sparas. <a href="./sa-funkar-det.html">Så funkar det</a>.';
   }
 }
 
@@ -849,11 +849,11 @@ window.addEventListener('beforeprint', () => {
   printState = [...$('#results').querySelectorAll('details')].map(node => [node, node.open]);
   for (const [node] of printState) node.open = true;
   for (const node of $('#results').querySelectorAll('[data-row]')) node.hidden = false;
-  document.title = `slopcheck — ${reportName} — ${reportDate}`;
+  document.title = `Slopcheck — ${reportName} — ${reportDate}`;
 });
 window.addEventListener('afterprint', () => {
   for (const [node, open] of printState ?? []) node.open = open;
-  document.title = 'slopcheck — kontrollera juridiska hänvisningar';
+  document.title = 'Slopcheck — kontrollera juridiska hänvisningar';
   updateReport();
 });
 $('#print').addEventListener('click', () => window.print());
