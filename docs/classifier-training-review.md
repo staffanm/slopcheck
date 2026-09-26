@@ -422,3 +422,36 @@ API response carries the calibrated `threshold` of the predicted class and the `
 "Självsäkerhet" slider in the report scales both from 100 % (the calibrated level) down to 0 % (the
 top label always), so the browser decides again without a new request. Abstentions for partial
 sources or text that is too long stay.
+
+## Browser model v3 on the v5 data, not shipped, 26 September 2026
+
+`scripts/train_scandi_nli.py` trained ScandiNLI-small on the v5 chunk pairs (`data/train.chunks.jsonl`,
+misleading as neutral), best validation macro F1 0.668 at epoch 3. It was exported to
+`public/models/scandi-nli-small-legal-v3-q8/` and calibrated on `data/calibration.audited.jsonl` with
+the browser policy (targets 0.95/0.90/0.95, Wilson slack 0.05): neutral 0.858, entailment and
+contradiction disabled, as for v2.
+
+`scripts/benchmark-browser-model.mjs` runs the model the way privacy mode does: the Vite app in
+Chromium, the semantic worker, onnxruntime-web (WASM here) and the JS tokenizer and windowing.
+
+| | v2 (shipped) | v3 |
+|---|---:|---:|
+| audited test partition, 863 scored rows, argmax accuracy | 0.687 | 0.634 |
+| recall entailment / neutral / contradiction | 0.75 / 0.71 / 0.48 | 0.68 / 0.59 / 0.62 |
+| accepted, precision (all "Stöd saknas") | 114, 0.947 | 136, 0.934 |
+| legal-claims fixture: labels given, wrong | 11, 2 | 12, 2 |
+| median time per test row, WASM | 205 ms | 209 ms |
+
+v3 repeats the v5 trade on a model one sixth the size: contradiction recall up 14 points, entailment
+and neutral down, overall accuracy down 5 points. v2 stays in `src/model-manifest.json`. The two
+wrong fixture labels are the same in both: correct claims called "Stöd saknas" by the rule in
+`semanticResult` for exact provisions (neutral at least 0.60, both other labels under 0.40).
+
+The "Självsäkerhet" slider and the score popup now work the same in both modes. Each result keeps
+its calibrated judgment and, when that judgment abstained only because the top label was under its
+threshold, the top label with its score and threshold (`serverCandidate`, `localCandidate`,
+`judgmentAt` in `src/semantic.js`). Conflicting passages, a missing conclusion and text that is too
+long still abstain at every level.
+
+`backend/model-integrity.json` holds the size and SHA-256 of each file the server loads, per model
+directory. `get_model()` refuses a model that differs or has no entry.

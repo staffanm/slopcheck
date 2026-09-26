@@ -1,7 +1,7 @@
 import './style.css';
 import { extract, getDocumentSource, pool, prefetchCorePack, request, resolveTarget, resolveTargetPrivate, stopExtractionWorker } from './api.js';
 import { claimContext, claimSegments, invalidCitationMessage, mergeOccurrences, occurrenceStatus, validateBlocks } from './analysis.js';
-import { matchesFilter, rowSemantic, SEMANTIC, semanticClaim, serverJudgment } from './semantic.js';
+import { matchesFilter, rowSemantic, SEMANTIC, judgmentAt, localCandidate, semanticClaim, serverCandidate } from './semantic.js';
 import { semanticClient } from './semantic-client.js';
 import { matchClaimRemote } from './api.js';
 
@@ -609,48 +609,53 @@ async function assessClaim(claim, items, isLocal, signal) {
   if (isLocal) {
     const pooled = ordered.flatMap(({ citation, passages }) => passages.map(passage => ({ ...passage, section: passage.section ?? (items.length > 1 ? citation : undefined) })))
       .map((passage, index) => ({ ...passage, index }));
-    return semantics.assess(claim, { ...items[0].evidence, passages: pooled }, signal);
+    const result = await semantics.assess(claim, { ...items[0].evidence, passages: pooled }, signal);
+    return withCertainty({ ...result, calibrated: { status: result.status, reason: result.reason, evidence: result.evidence }, candidate: localCandidate(result) });
   }
   const sources = ordered.map(({ citation, passages }) => ({ text: passages.map(passage => passage.text).join('\n\n'), citation }));
   const response = await matchClaimRemote(claim.hypothesis, sources, { signal });
   const [first] = response.comparisons ?? [];
-  const server = {
-    status: response.status, reason: response.reason, predicted: first?.predicted_class, abstainReason: first?.abstain_reason,
-    scores: first?.scores, confidence: first?.confidence, margin: first?.margin, threshold: first?.threshold ?? 1, minimumMargin: first?.minimum_margin ?? 0,
-  };
-  return {
-    ...serverJudgment(server, certaintyLevel()),
-    server,
-    evidence: response.evidence ? { text: response.evidence.source ?? response.evidence } : undefined,
+  const evidence = response.evidence ? { text: response.evidence.source ?? response.evidence, scores: first?.scores } : undefined;
+  return withCertainty({
+    calibrated: { status: response.status, reason: response.reason, evidence },
+    candidate: serverCandidate({ predicted: first?.predicted_class, abstainReason: first?.abstain_reason, confidence: first?.confidence,
+      margin: first?.margin, threshold: first?.threshold ?? 1, minimumMargin: first?.minimum_margin ?? 0 }),
     comparisons: (response.comparisons ?? []).map(item => ({ text: item.source, scores: item.scores })),
     backend: 'Server',
     model: response.model_version || response.model,
-  };
+  });
 }
 
-const SCORE_LABELS = { supported: 'Stöd hittat', unsupported: 'Stöd saknas', incorrect: 'Motsägelse', misleading: 'Vilseledande' };
+// The server model has four labels, the browser model three.
+const SCORE_LABELS = { supported: 'Stöd hittat', entailment: 'Stöd hittat', unsupported: 'Stöd saknas', neutral: 'Stöd saknas',
+  incorrect: 'Motsägelse', contradiction: 'Motsägelse', misleading: 'Vilseledande' };
 
-// The model's temperature-scaled probability per label, for a hover text.
+// The model's probability per label for the deciding comparison, for a hover text.
 function scoreText(result) {
-  const scores = result?.server?.scores;
-  if (!scores || !Object.keys(scores).length) return '';
-  return Object.entries(SCORE_LABELS).map(([key, label]) => `${label}: ${Math.round((scores[key] ?? 0) * 100)} %`).join('\n');
+  const scores = result?.evidence?.scores;
+  if (!scores) return '';
+  return Object.entries(SCORE_LABELS).filter(([key]) => key in scores)
+    .map(([key, label]) => `${label}: ${Math.round(scores[key] * 100)} %`).join('\n');
+}
+
+function withCertainty(result) {
+  return { ...result, ...judgmentAt(result.calibrated, result.candidate, certaintyLevel()) };
 }
 
 function certaintyLevel() {
   return Number($('#certainty').value) / 100;
 }
 
-// Server results keep the model's raw judgment, so a new level re-decides
-// them without a new request.
+// Results keep the calibrated judgment and the model's top label, so a new
+// level decides again without running the model.
 function updateCertainty() {
   const level = certaintyLevel();
   $('#certainty-value').textContent = level === 1 ? '100 % (kalibrerad nivå)' : level === 0 ? '0 % (tvingad bedömning)' : `${Math.round(level * 100)} %`;
   for (const row of rows) {
     let changed = false;
     for (const [uri, result] of row.semantic) {
-      if (!result.server) continue;
-      row.semantic.set(uri, { ...result, ...serverJudgment(result.server, level) });
+      if (!result.calibrated) continue;
+      row.semantic.set(uri, withCertainty(result));
       changed = true;
     }
     if (changed) row.semanticRevision++;
@@ -759,7 +764,6 @@ $('#check').addEventListener('click', async () => {
     const modeLabel = isLocal ? 'Integritetsläge · lokal jämförelse i webbläsaren' : 'Normalläge · serverjämförelse';
     $('#report-meta').textContent = `${reportName} · ${reportDate} · ${targets.size} unika mål · ${modeLabel} (experimentellt)`;
     $('#filter').value = 'all';
-    $('#certainty-row').hidden = isLocal;
     $('#results').replaceChildren(...rows.map(makeRow));
     showDocument();
     $('#report').hidden = false;

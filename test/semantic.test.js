@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { Tokenizer } from '@huggingface/tokenizers';
 import { readFileSync } from 'node:fs';
 import { claimContext } from '../src/analysis.js';
-import { MODEL_VERSION, semanticClaim, semanticResult, scoresFromLogits, rowSemantic, matchesFilter, serverJudgment } from '../src/semantic.js';
+import { MODEL_VERSION, semanticClaim, semanticResult, scoresFromLogits, rowSemantic, matchesFilter, judgmentAt, localCandidate, serverCandidate } from '../src/semantic.js';
 import { modelPassages, pairInput, premiseWindow } from '../src/semantic-input.js';
 
 // The policy tests pin the provisional thresholds; the shipped manifest may disable labels.
@@ -117,13 +117,22 @@ test('multiple targets and semantic filters do not change source validity', () =
   assert.equal(matchesFilter('unassessed', 'invalid', 'abstain'), true);
 });
 
-test('a lower certainty level forces server judgments that fell under the calibrated threshold', () => {
-  const server = { status: 'abstain', reason: 'Under tröskeln.', predicted: 'incorrect', abstainReason: 'low_confidence', confidence: 0.6, margin: 0.3, threshold: 0.8, minimumMargin: 0.2 };
-  assert.equal(serverJudgment(server, 1).status, 'abstain');
-  assert.equal(serverJudgment(server, 0.7).status, 'incorrect');
-  assert.equal(serverJudgment(server, 0.7).forced, true);
-  assert.equal(serverJudgment({ ...server, abstainReason: 'class_disabled', threshold: 1.01 }, 1).status, 'abstain');
-  assert.equal(serverJudgment({ ...server, predicted: 'unsupported', abstainReason: 'partial_sources' }, 0).status, 'abstain');
-  const accepted = { ...server, status: 'correct', predicted: 'supported', abstainReason: null, confidence: 0.9 };
-  assert.deepEqual(serverJudgment(accepted, 1), { status: 'correct', reason: 'Under tröskeln.', forced: false });
+test('a lower certainty level forces judgments under the calibrated threshold, for both models', () => {
+  const abstain = { status: 'abstain', reason: 'Under tröskeln.' };
+  const server = serverCandidate({ predicted: 'incorrect', abstainReason: 'low_confidence', confidence: 0.6, margin: 0.3, threshold: 0.8, minimumMargin: 0.2 });
+  assert.equal(judgmentAt(abstain, server, 1).status, 'abstain');
+  assert.equal(judgmentAt(abstain, server, 0.7).status, 'incorrect');
+  assert.equal(judgmentAt(abstain, server, 0.7).forced, true);
+  assert.equal(serverCandidate({ predicted: 'unsupported', abstainReason: 'partial_sources' }), null);
+  assert.equal(serverCandidate({ predicted: 'supported', abstainReason: null }), null);
+
+  const thresholds = { supported: 1.01, neutral: 0.88, contradiction: 1.01, conflict: 0.5 };
+  const local = semanticResult([comparison('Ett anbud är bindande.', scores(0.8, 0.15, 0.05))], { thresholds });
+  assert.equal(local.status, 'abstain');
+  const candidate = localCandidate(local, thresholds);
+  assert.equal(judgmentAt(local, candidate, 1).status, 'abstain');
+  assert.equal(judgmentAt(local, candidate, 0.75).status, 'correct');
+  assert.equal(judgmentAt(local, candidate, 0.75).evidence.text, 'Ett anbud är bindande.');
+  const conflicting = semanticResult([comparison('a', scores(0.98, 0.01, 0.01)), comparison('b', scores(0.01, 0.01, 0.98))], { thresholds: PROVISIONAL });
+  assert.equal(localCandidate(conflicting, PROVISIONAL), null);
 });

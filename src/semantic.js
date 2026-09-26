@@ -173,25 +173,39 @@ export function semanticResult(comparisons, { incomplete = false, requireConclus
   return { status, reason: status === 'abstain' ? reason : SEMANTIC[status][1], evidence, comparisons };
 }
 
-// Server abstentions that only reflect the calibrated certainty level. The
-// user can lower that level; other abstentions (partial sources, text too
-// long) stay.
-const FORCEABLE = new Set(['low_confidence', 'low_margin', 'class_disabled']);
+// The "Självsäkerhet" slider. Both models give a calibrated judgment and, when
+// that judgment abstained only because the top label fell under its
+// threshold, a candidate: the top label with its score and threshold. Other
+// abstentions (conflicting passages, partial sources, text too long) have no
+// candidate and stay.
 const SERVER_STATUS = { supported: 'correct', unsupported: 'missing', incorrect: 'incorrect', misleading: 'misleading' };
+const LOCAL_STATUS = { entailment: 'correct', neutral: 'missing', contradiction: 'incorrect' };
+const LOCAL_THRESHOLD = { entailment: 'supported', neutral: 'neutral', contradiction: 'contradiction' };
 
-// `level` is the share of the calibrated threshold and margin that a judgment
-// must reach: 1 is the calibrated level, 0 accepts the model's top label.
-export function serverJudgment(server, level) {
-  if (!FORCEABLE.has(server.abstainReason) || !SERVER_STATUS[server.predicted]) {
-    return { status: server.status, reason: server.reason, forced: false };
-  }
-  if (server.confidence < level * Math.min(server.threshold, 1) || server.margin < level * server.minimumMargin) {
-    return { status: 'abstain', reason: server.reason, forced: false };
-  }
-  const status = SERVER_STATUS[server.predicted];
+export function serverCandidate(server) {
+  if (!['low_confidence', 'low_margin', 'class_disabled'].includes(server.abstainReason) || !SERVER_STATUS[server.predicted]) return null;
+  return { status: SERVER_STATUS[server.predicted], confidence: server.confidence, threshold: server.threshold,
+    margin: server.margin, minimumMargin: server.minimumMargin };
+}
+
+export function localCandidate(result, thresholds = THRESHOLDS) {
+  if (result.status !== 'abstain' || result.reason !== SEMANTIC.abstain[1] || !result.comparisons?.length) return null;
+  const top = item => Object.entries(item.scores).reduce((a, b) => (b[1] > a[1] ? b : a));
+  const evidence = result.comparisons.reduce((a, b) => (top(b)[1] > top(a)[1] ? b : a));
+  const [label, confidence] = top(evidence);
+  return { status: LOCAL_STATUS[label], confidence, threshold: thresholds[LOCAL_THRESHOLD[label]], evidence };
+}
+
+// `level` is the share of the calibrated threshold (and margin) the top label
+// must reach: 1 is the calibrated judgment, 0 always takes the top label.
+export function judgmentAt(calibrated, candidate, level) {
+  const kept = { status: calibrated.status, reason: calibrated.reason, evidence: calibrated.evidence, forced: false };
+  if (level >= 1 || !candidate) return kept;
+  if (candidate.confidence < level * Math.min(candidate.threshold, 1) || (candidate.margin ?? 1) < level * (candidate.minimumMargin ?? 0)) return kept;
   return {
-    status,
-    reason: `${SEMANTIC[status][1]} Modellen är ${Math.round(server.confidence * 100)} % säker, under den kalibrerade nivån.`,
+    status: candidate.status,
+    reason: `${SEMANTIC[candidate.status][1]} Modellen är ${Math.round(candidate.confidence * 100)} % säker, under den kalibrerade nivån.`,
+    evidence: candidate.evidence ?? calibrated.evidence,
     forced: true,
   };
 }
