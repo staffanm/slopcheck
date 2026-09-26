@@ -282,7 +282,7 @@ test('model download failure abstains while source evidence remains available; r
   await page.locator('#retry-semantic').click();
   await expect(page.locator('#progress')).toBeHidden({ timeout: 30000 });
   await expect(page.locator('#retry-semantic')).toBeHidden();
-  await expect(page.locator('.semantic-evidence')).toContainText('WASM');
+  await expect(page.locator('.semantic-result')).toContainText('WASM');
 });
 
 test('only invalid or citation-list input never downloads a model', async ({ page }) => {
@@ -349,10 +349,8 @@ test('a supported claim shows separate source validity, original evidence, and p
   // the calibrated thresholds in the manifest, so only forbid a wrong one.
   await expect(page.locator('.semantic-result')).toBeVisible();
   await expect(page.locator('.semantic-result.incorrect, .semantic-result.missing, .semantic-result.misleading')).toHaveCount(0);
-  await expect(page.locator('.semantic-evidence')).toContainText('Ett sent svar');
-  await page.evaluate(() => window.dispatchEvent(new Event('beforeprint')));
-  await expect(page.locator('.semantic-evidence')).toHaveAttribute('open', '');
-  await expect(page.locator('.semantic-evidence')).toContainText(manifest.version);
+  await expect(page.locator('.semantic-result')).toContainText('Ett sent svar');
+  await expect(page.locator('.semantic-result')).toContainText(manifest.version);
 });
 
 test('a page range is one judgment over both pages, sent whole', async ({ page }) => {

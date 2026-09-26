@@ -299,29 +299,19 @@ function renderSource(group, multiple, row) {
   const result = row.semantic.get(target.uri);
   if (result) {
     const review = element('div', `semantic-result ${result.status}${result.status === 'correct' ? ' supported' : ''}${result.status === 'incorrect' ? ' contradiction' : ''}`);
-    const heading = element('strong', '', `${SEMANTIC[result.status][0]} · experimentellt${result.forced ? ' · under säkerhetsnivån' : ''}`);
+    const heading = element('strong', '', `${SEMANTIC[result.status][0]}${result.forced ? ' · under säkerhetsnivån' : ''}`);
     heading.title = scoreText(result);
     review.append(heading);
     if (result.status !== 'pending') {
       review.append(element('p', 'source-note', result.reason));
-      if (result.comparisons?.length) {
-        const detail = element('details', 'semantic-evidence');
-        detail.append(element('summary', '', 'Visa påstående och jämförelse'));
-        detail.append(element('p', 'source-note', 'Påståendet som jämfördes'));
-        if (row.claim.authority) detail.append(element('p', 'source-note', `Tillskrivet ${row.claim.authority}`));
-        detail.append(element('blockquote', '', row.claim.hypothesis));
-        // A substantive label always exposes its decisive evidence in the open card.
-        if (result.status !== 'abstain') {
-          if (passageLabel(result.evidence)) review.append(element('p', 'source-note', passageLabel(result.evidence)));
-          review.append(element('blockquote', 'decisive-evidence', result.evidence.text));
-          review.append(element('p', 'source-note', `Jämfört påstående: ${row.claim.hypothesis}`));
-        }
-        for (const item of result.comparisons) {
-          if (passageLabel(item)) detail.append(element('p', 'source-note', passageLabel(item)));
-          detail.append(element('blockquote', '', item.text));
-        }
-        detail.append(element('p', 'source-note', `${result.comparisons.length} avsnitt · ${result.backend} · ${result.model}`));
-        review.append(detail);
+      // The claim stands above the card. The card shows the passage that
+      // decided the label, or the one compared when the model abstained.
+      const passage = result.evidence?.text ? result.evidence : result.comparisons?.[0];
+      if (passage) {
+        if (passageLabel(passage)) review.append(element('p', 'source-note', passageLabel(passage)));
+        review.append(element('blockquote', 'decisive-evidence', passage.text));
+        review.append(element('p', 'source-note', [row.claim.authority && `Tillskrivet ${row.claim.authority}`,
+          `${result.comparisons.length} avsnitt · ${result.backend} · ${result.model}`].filter(Boolean).join(' · ')));
       }
     }
     section.append(review);
@@ -367,7 +357,9 @@ function makeRow(row, index) {
   node.id = `citation-detail-${index}`;
   node.querySelector('summary').addEventListener('click', event => {
     event.preventDefault();
-    selectRow(index, { scrollDocument: true });
+    // The rotated "+" reads as a close button, so a click on an open card closes it.
+    if (selectedRow === index && node.querySelector('details').open) collapseRow(index);
+    else selectRow(index, { scrollDocument: true });
   });
   node.querySelector('.result-title strong').textContent = row.occurrence.text;
   const labels = [...new Set(row.occurrence.locations.map(location => checkedBlocks.find(block => block.id === location.block_id).label).filter(Boolean))];
@@ -447,6 +439,14 @@ function updateMarks() {
     }
     mark.node.setAttribute('aria-pressed', String(active));
   }
+}
+
+function collapseRow(index) {
+  selectedRow = null;
+  const node = $(`#citation-detail-${index}`);
+  node.classList.remove('selected');
+  node.querySelector('details').open = false;
+  updateMarks();
 }
 
 function selectRow(index, { scrollDocument = false, focusAside = false } = {}) {
