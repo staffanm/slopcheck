@@ -41,7 +41,10 @@ async function readDocx(buffer) {
     externalFileAccess: false,
     convertImage: mammoth.images.imgElement(() => Promise.resolve({ src: '' })),
   });
-  return { html: converted.value, warnings: converted.messages.length ? ['Word-filen innehåller formatering som inte kunde läsas fullständigt. Kontrollera dokumenttexten i rapporten.'] : [] };
+  // An unknown paragraph or run style ("Brödtext 2") is read as plain text and
+  // loses nothing; other messages can mean skipped content.
+  const lossy = converted.messages.filter(message => !/^Unrecognised (paragraph|run) style/.test(message.message));
+  return { html: converted.value, warnings: lossy.length ? ['Word-filen innehåller formatering som inte kunde läsas fullständigt. Kontrollera dokumenttexten i rapporten.'] : [] };
 }
 
 self.onmessage = async ({ data }) => {
