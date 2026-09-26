@@ -173,6 +173,29 @@ export function semanticResult(comparisons, { incomplete = false, requireConclus
   return { status, reason: status === 'abstain' ? reason : SEMANTIC[status][1], evidence, comparisons };
 }
 
+// Server abstentions that only reflect the calibrated certainty level. The
+// user can lower that level; other abstentions (partial sources, text too
+// long) stay.
+const FORCEABLE = new Set(['low_confidence', 'low_margin', 'class_disabled']);
+const SERVER_STATUS = { supported: 'correct', unsupported: 'missing', incorrect: 'incorrect', misleading: 'misleading' };
+
+// `level` is the share of the calibrated threshold and margin that a judgment
+// must reach: 1 is the calibrated level, 0 accepts the model's top label.
+export function serverJudgment(server, level) {
+  if (!FORCEABLE.has(server.abstainReason) || !SERVER_STATUS[server.predicted]) {
+    return { status: server.status, reason: server.reason, forced: false };
+  }
+  if (server.confidence < level * Math.min(server.threshold, 1) || server.margin < level * server.minimumMargin) {
+    return { status: 'abstain', reason: server.reason, forced: false };
+  }
+  const status = SERVER_STATUS[server.predicted];
+  return {
+    status,
+    reason: `${SEMANTIC[status][1]} Modellen är ${Math.round(server.confidence * 100)} % säker, under den kalibrerade nivån.`,
+    forced: true,
+  };
+}
+
 export function rowSemantic(row) {
   const results = [...row.semantic.values()];
   if (!results.length) return 'abstain';

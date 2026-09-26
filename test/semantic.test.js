@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { Tokenizer } from '@huggingface/tokenizers';
 import { readFileSync } from 'node:fs';
 import { claimContext } from '../src/analysis.js';
-import { MODEL_VERSION, semanticClaim, semanticResult, scoresFromLogits, rowSemantic, matchesFilter } from '../src/semantic.js';
+import { MODEL_VERSION, semanticClaim, semanticResult, scoresFromLogits, rowSemantic, matchesFilter, serverJudgment } from '../src/semantic.js';
 import { modelPassages, pairInput, premiseWindow } from '../src/semantic-input.js';
 
 // The policy tests pin the provisional thresholds; the shipped manifest may disable labels.
@@ -115,4 +115,15 @@ test('multiple targets and semantic filters do not change source validity', () =
   assert.equal(matchesFilter('review', 'found', 'incorrect'), true);
   assert.equal(matchesFilter('invalid', 'found', 'incorrect'), false);
   assert.equal(matchesFilter('unassessed', 'invalid', 'abstain'), true);
+});
+
+test('a lower certainty level forces server judgments that fell under the calibrated threshold', () => {
+  const server = { status: 'abstain', reason: 'Under tröskeln.', predicted: 'incorrect', abstainReason: 'low_confidence', confidence: 0.6, margin: 0.3, threshold: 0.8, minimumMargin: 0.2 };
+  assert.equal(serverJudgment(server, 1).status, 'abstain');
+  assert.equal(serverJudgment(server, 0.7).status, 'incorrect');
+  assert.equal(serverJudgment(server, 0.7).forced, true);
+  assert.equal(serverJudgment({ ...server, abstainReason: 'class_disabled', threshold: 1.01 }, 1).status, 'abstain');
+  assert.equal(serverJudgment({ ...server, predicted: 'unsupported', abstainReason: 'partial_sources' }, 0).status, 'abstain');
+  const accepted = { ...server, status: 'correct', predicted: 'supported', abstainReason: null, confidence: 0.9 };
+  assert.deepEqual(serverJudgment(accepted, 1), { status: 'correct', reason: 'Under tröskeln.', forced: false });
 });
