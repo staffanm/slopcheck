@@ -219,3 +219,206 @@ five. Its 0.65 there points at what the generated pairs do not cover: 1915 wordi
 "i ty fall") and the markdown-bold "**4 §**" of the fixture text. Both HB 10:9 claims fail for
 the same reason. Provisions from older acts still in force exist in the corpus and can be
 sampled on purpose.
+
+## Teacher audit, source repair and model v3, 25 September 2026
+
+The label noise suspected above was measured with a local teacher, `gemma4:26b` through ollama,
+one letter per pair read from the logprobs (`scripts/audit_labels_teacher.py`). The teacher agreed
+with 68% of the training labels. Judged on its own against a long source it misses single-word flips
+("avsevärt förbättrat" against a source that says "försämrat" was called supported), so rewritten rows
+are instead judged next to their original claim (`scripts/audit_transformations_teacher.py`), which
+agrees with 81% of them.
+
+A quarter of the authentic rows were rejected. The claims are sound; the stored source text was not:
+CJEU pinpoints written "p. 49" fell back to the document header, "HD fattade beslut i enlighet med
+betänkandet" cut the reasoning away with the dissent, numbered points inside a provision were dropped,
+and "s. 83 f." lost page 84. `backend/resolver.py` fixes all four. `scripts/repair_rejected_sources.py`
+re-resolves the sources of rejected rows and asks the teacher again: 83 of 254 rejected parents came
+back accepted, and 339 siblings received the repaired text.
+
+`scripts/apply_teacher_audit.py` then wrote `data/train.audited.jsonl` (6130 of 7428 rows) and
+`data/validation.audited.jsonl` (789 of 996) with three rules: children of a rejected parent go,
+a rewrite the teacher judged as not having its labelled effect goes, and any other row goes on a
+confident label disagreement. Model v3 (`models/classifier-kb-bert-4way-v3`) is KB-BERT trained on
+those files with the v2 recipe; best validation macro F1 0.824 at epoch 3.
+
+On the unchanged test partition, calibrated with the same 0.85 targets and 0.10 slack as v2:
+
+| | v2 | v3 |
+|---|---:|---:|
+| argmax accuracy, 860 rows | 0.735 | 0.731 |
+| accuracy, 646 rows whose label the teacher confirms | 0.800 | 0.827 |
+| accuracy, 199 rows whose label the teacher rejects | 0.533 | 0.437 |
+| accepted under the fail-closed policy | 513 (0.856 precision) | 270 (0.815 precision), `unsupported` disabled |
+| `incorrect` recall | 0.636 | 0.487 |
+| judgment-derived contradiction rows, teacher-confirmed | 0.56 (39 rows) | 0.28 |
+| legal-claims fixture, argmax | 23 of 62 accepted, 9 right | 33 of 62 right, 9 accepted, 3 wrong |
+
+v3 gains on supported-type rows (authentic 0.67 to 0.79, paraphrase 0.74 to 0.86, distractor 0.71 to
+0.81) and loses on judgment-derived contradictions and overstatements. Coverage fell because the
+calibration partition keeps its noisy labels: a model trained to disagree with them is scored as less
+confident. The calibration and test partitions have teacher verdicts in `data/teacher/` but were not
+filtered or repaired, so v2 and v3 stay comparable on the same rows.
+
+Still open after v3:
+
+- Filter and repair the calibration partition the same way before fitting thresholds, and report
+  test numbers on the teacher-confirmed rows.
+- The contradiction loss: 130 judgment-derived contradiction rows went with their rejected parents
+  and 70 overstatements were judged "same meaning". Check whether the remaining contradiction rows
+  are dominated by provision pairs.
+- Extraction fixes only reach rows that are re-resolved. Regenerating the partitions from the fixed
+  resolver would also repair rows the teacher accepted despite a broken source.
+
+## Sentence-level alignment and model v4, 25 September 2026
+
+Chunk mode scores every paragraph chunk of every source against the claim and pools the chunk
+distributions: support, contradiction and overstatement are each as strong as the strongest chunk,
+"stöd saknas" as strong as the weakest chunk's unsupported probability (`ClaimClassifier.pool_chunks`).
+The chunker (`backend/windowing.py: source_chunks`) is the BM25 window's paragraph splitter with bare
+labels merged into the next paragraph, and the same header form. `calibration.json` carries
+`"mode": "chunks"`, so a window-mode model serves as before.
+
+Model v4 is KB-BERT trained on chunk pairs (`scripts/build_chunk_pairs.py`): for each audited row the
+chunk the teacher named (`scripts/select_chunks_teacher.py`) carries the row label and two other chunks
+are unsupported; 13,510 pairs, two thirds unsupported. Best validation macro F1 0.748 on chunk pairs.
+
+The calibration partition was filtered and repaired the same way as train (543 of 672 rows kept,
+`data/calibration.audited.jsonl`). All four configurations below are calibrated on it with 0.85
+targets and 0.10 slack, and scored on the unchanged test partition. "Confirmed" rows are the 646 test
+rows whose label the teacher agrees with.
+
+| | v2 window | v3 window | v3 chunks | v4 chunks |
+|---|---:|---:|---:|---:|
+| test argmax accuracy | 0.735 | 0.731 | 0.713 | 0.724 |
+| accepted of 860, precision | 499, 0.834 | 613, 0.799 | 651, 0.774 | 680, 0.794 |
+| classes enabled | 3 | 4 | 4 | 4 |
+| confirmed rows: accuracy | 0.800 | 0.827 | 0.807 | 0.814 |
+| confirmed rows: accepted, precision | 382, 0.919 | 470, 0.909 | 494, 0.868 | 525, 0.891 |
+| judgment-derived contradictions, 85 rows | 0.41 | 0.19 | 0.21 | 0.22 |
+| overstatements, 86 rows | 0.71 | 0.57 | 0.56 | 0.58 |
+| authentic rows, 90 | 0.63 | 0.74 | 0.72 | 0.74 |
+| legal-claims fixture: argmax right, accepted, wrong | 30, 12, 5 | 33, 17, 7 | 35, 24, 11 | 32, 32, 12 |
+
+Calibrating on audited rows raises coverage for every model (v2: 499 against 513 before, with one
+class fewer enabled; v3 window: 613 against 270). Chunk mode adds coverage again and turns every
+class on. The teacher-filtered models stay behind v2 on judgment-derived contradictions.
+
+Why the contradictions dropped: the filter removed supported rows whose words are not in the source
+(median claim-word overlap 0.35 against 0.61 for kept rows) and unsupported rows whose words are
+(0.27 against 0.15). Those rows were what forced the model past word overlap. A contradiction is a
+high-overlap pair with one flipped word, and v3 answers supported on 51 of the 85, v2 on 35. Chunk
+training did not repair it: the shortcut is in the label distribution, not the window.
+
+Still open after v4:
+
+- High-overlap negatives. The audited data needs more pairs where the wording matches and the label
+  is not supported: contradictions with the flip inside a chunk, and unsupported rows built from
+  neighbouring paragraphs of the supporting source.
+- Precision on the unchanged test partition is below the 0.85 target for every model; on the
+  confirmed rows it is above. Filtering the test partition the same way would make the target
+  measurable, at the cost of comparability with earlier numbers.
+- 171 training rows and 6 rows with sources over 300,000 characters have no chunk pick and are absent
+  from the chunk pairs.
+
+## Audited test partition, 25 September 2026
+
+The test partition was given the same treatment as train and calibration, with one difference: no row
+was dropped on the teacher's word alone. Sources were re-resolved on every row (57 parents and 143
+siblings changed text). The 110 rows the rules would have dropped were reviewed one by one by three
+Claude reviewer agents with the label definitions and the parent claim in front of them: 68 kept,
+42 relabelled, none dropped (`data/teacher/test.decisions.jsonl`, applied through
+`scripts/apply_teacher_audit.py --decisions`). Relabels: 12 "adjacent" negatives whose neighbouring
+page states the claim, 12 overstatement rewrites with no change of meaning and 2 that reverse it,
+15 rows whose only source text is a header or fragment, 1 statute memo. `data/test.audited.jsonl`
+keeps all 868 rows, so it is comparable row by row with the old file.
+
+All four configurations, calibrated on `data/calibration.audited.jsonl`, scored on it:
+
+| | v2 window | v3 window | v3 chunks | v4 chunks |
+|---|---:|---:|---:|---:|
+| argmax accuracy | 0.729 | 0.761 | 0.740 | 0.743 |
+| macro F1 | 0.715 | 0.731 | 0.713 | 0.716 |
+| accepted of 868, precision | 519, 0.834 | 613, 0.830 | 648, 0.807 | 673, 0.826 |
+| classes enabled | 3 | 4 | 4 | 4 |
+| incorrect recall | 0.63 | 0.50 | 0.49 | 0.51 |
+| judgment-derived contradictions, 85 rows | 0.44 | 0.25 | 0.24 | 0.27 |
+| authentic rows, 90 | 0.61 | 0.79 | 0.78 | 0.78 |
+| legal-claims fixture: argmax right, accepted, wrong | 30, 12, 5 | 33, 17, 7 | 35, 24, 11 | 32, 32, 12 |
+
+On honest labels v3 in window mode leads on accuracy by three points over v2, and the chunk models
+lead on coverage. The contradiction gap is unchanged by the relabelling, so it is a property of the
+models, not of the test labels. The 868 rows come from about 150 independent claim families; the
+overall accuracy interval is about ±3 points and the 85-row contradiction cell about ±10.
+
+## More rewrites, neighbour chunks and model v5, 26 September 2026
+
+Two data additions, both judged by the teacher before use:
+
+- `scripts/generate_rewrites.py`: one new contradiction and one new overstatement per accepted parent
+  claim (1,091 in train), judged pairwise against the parent. 1,471 contradictions and 372
+  overstatements survived; 206 overstatements were judged to have the same meaning and 32 to be
+  contradictions (kept as incorrect).
+- `scripts/neighbour_chunks.py`: the chunk before and after the deciding chunk, judged against the
+  parent claim as the only source. 944 came out unsupported and were copied to 3,357 rewrites of the
+  same claim; 203 came out supported (a neighbouring paragraph that restates the point).
+
+`scripts/build_chunk_pairs.py` now falls back to the parent's chunk pick for rewrites (1,436 rows in
+train, 99 still without a pick). Train has 22,563 chunk pairs: 16,053 unsupported, 2,746 supported,
+2,580 incorrect, 1,184 misleading. v5 is KB-BERT on those pairs, best validation macro F1 0.722.
+Scored like the others on the audited partitions:
+
+| | v2 window | v3 window | v4 chunks | v5 chunks |
+|---|---:|---:|---:|---:|
+| argmax accuracy | 0.729 | 0.761 | 0.743 | 0.734 |
+| accepted, precision | 519, 0.834 | 613, 0.830 | 673, 0.826 | 653, 0.835 |
+| incorrect recall / precision | 0.63 / 0.59 | 0.50 / 0.71 | 0.51 / 0.61 | 0.61 / 0.52 |
+| supported recall / precision | 0.66 / 0.77 | 0.78 / 0.75 | 0.74 / 0.74 | 0.67 / 0.80 |
+| judgment-derived contradictions, 85 rows | 0.44 | 0.25 | 0.27 | 0.51 |
+| paraphrases, 89 rows | 0.75 | 0.84 | 0.79 | 0.67 |
+| legal-claims fixture: argmax right, accepted, wrong | 30, 12, 5 | 33, 17, 7 | 32, 32, 12 | 32, 25, 11 |
+
+The high-overlap negatives did what they were meant to: contradictions went from 0.27 to 0.51 and
+incorrect recall from 0.51 to 0.61. The cost is on the other side of the same boundary: supported
+rows called incorrect rose from 38 to 63 and paraphrase accuracy fell from 0.79 to 0.67. Overall
+accuracy is unchanged within the interval. In every model the contradiction rows that pass the
+threshold are mostly wrong (precision 0.03 to 0.24 on 34 to 45 accepted rows): the model is
+confident on exactly the flipped pairs it misreads.
+
+Still open after v5:
+
+- The supported/incorrect boundary is now balanced by data volume in both directions; the model
+  itself does not see the flipped word reliably. A pair-aware feature (which content words differ
+  between claim and deciding chunk) or a larger encoder is the next lever, not more pairs.
+- Contradiction rows pass the threshold when wrong. Per-transformation calibration is not available
+  at serving time, but the margin threshold could be raised for the incorrect class.
+- v3 window stays the best single number on accuracy; v5 chunks the best on coverage with the
+  contradiction recall of v2.
+
+## All versions in both modes, and v5 window in production, 26 September 2026
+
+Every KB-BERT version and mmBERT-small were scored through `scripts/calibrate_onnx.py` in window
+and chunks mode (calibrated on `data/calibration.audited.jsonl`, scored on the 860 assessable rows of
+`data/test.audited.jsonl`). The rows not in the tables above:
+
+| | v1 window | v4 window | v5 window | mmBERT window |
+|---|---:|---:|---:|---:|
+| argmax accuracy | 0.528 | 0.756 | 0.722 | 0.607 |
+| macro F1 | 0.489 | 0.735 | 0.704 | 0.461 |
+| accepted, precision | 73, 1.000 | 550, 0.829 | 587, 0.842 | 195, 0.687 |
+| classes enabled | 1 | 4 | 4 | 1 |
+| incorrect recall / precision | 0.29 / 0.40 | 0.55 / 0.58 | 0.63 / 0.49 | 0.46 / 0.54 |
+| judgment-derived contradictions | 0.22 | 0.33 | 0.51 | 0.32 |
+| paraphrases | 0.80 | 0.78 | 0.60 | 0.88 |
+
+v1 chunks, v2 chunks and mmBERT chunks are no better than their window rows. mmBERT never predicts
+misleading and was scored at the 512-token limit of `ClaimClassifier`. If a misleading row counts as
+right when the model says supported or incorrect, every KB-BERT accuracy rises by 3 to 4 points and
+the order does not change.
+
+The server now runs v5 in window mode (`models/classifier-kb-bert-4way-v5/calibration.json` is the
+window calibration: temperature 1.80, margin 0.20, all four classes enabled). Each comparison in the
+API response carries the calibrated `threshold` of the predicted class and the `minimum_margin`. The
+"Självsäkerhet" slider in the report scales both from 100 % (the calibrated level) down to 0 % (the
+top label always), so the browser decides again without a new request. Abstentions for partial
+sources or text that is too long stay.

@@ -95,7 +95,7 @@ def score_rows(classifier: ClaimClassifier, rows: list[dict]) -> tuple[np.ndarra
             skipped["unassessable"] += 1
             continue
         sources = [{"citation": s.get("citation") or "", "text": s["text"], "unit_type": s.get("unit_type", "unknown")} for s in row["sources"]]
-        _, _, raw = classifier.raw_logits(row["claim"], sources)
+        raw = classifier.logits_for(row["claim"], sources)["logits"]
         if raw is None:
             skipped["unit_too_long"] += 1
             continue
@@ -162,6 +162,8 @@ def main() -> None:
     parser.add_argument("--target-precision", action="append", default=[], metavar="CLASS=VALUE",
                         help="Override a class's target precision, e.g. supported=0.90. Repeatable.")
     parser.add_argument("--threads", type=int, default=8)
+    parser.add_argument("--mode", choices=["window", "chunks"], default="window",
+                        help="window: one BM25 window per claim (default); chunks: score every chunk and pool.")
     parser.add_argument("--report-dir", default=None, help="Where to write calibration.json and evaluation_report.json (default: model dir).")
     args = parser.parse_args()
     model_dir = Path(args.model_dir)
@@ -170,6 +172,7 @@ def main() -> None:
 
     classifier = ClaimClassifier(model_dir=model_dir, num_threads=args.threads)
     classifier.load()
+    classifier.mode = args.mode
 
     print("Scoring calibration partition...")
     cal_logits, cal_targets, _ = score_rows(classifier, read_jsonl(Path(args.cal_data)))
@@ -193,6 +196,7 @@ def main() -> None:
         print(f"  {class_name:<12} {state}; accepted={metrics['accepted']}, precision={metrics['empirical_precision']}, wilson={metrics['wilson_lower_bound']}")
 
     calibration = {
+        "mode": args.mode,
         "temperature": round(temperature, 4),
         "minimum_margin": minimum_margin,
         "thresholds": thresholds,
@@ -221,10 +225,21 @@ def main() -> None:
     for class_name, metrics in selective["per_class"].items():
         print(f"  {class_name:<12} accepted={metrics['accepted']} precision={metrics['precision']}")
 
-    groups: dict[str, dict[str, list[int]]] = {"unit_type": defaultdict(list), "family": defaultdict(list)}
+    groups: dict[str, dict[str, list[int]]] = {"unit_type": defaultdict(list), "family": defaultdict(list),
+                                               "transformation": defaultdict(list), "teacher": defaultdict(list)}
+    teacher_path = Path(args.test_data).parent / "teacher" / Path(args.test_data).name
+    teacher = {}
+    if teacher_path.exists():
+        for verdict in read_jsonl(teacher_path):
+            confident = verdict["teacher_label"] and max(verdict["teacher_probs"]) >= 0.8
+            teacher[verdict["id"]] = ("confirmed" if verdict["teacher_label"] == verdict["label"]
+                                      else "rejected" if confident else "unsure")
     for index, row in enumerate(test_rows):
         groups["unit_type"][row["sources"][0].get("unit_type", "unknown")].append(index)
         groups["family"]["provision_pairs" if row["id"].startswith("sfs_") else "judgment_derived"].append(index)
+        groups["transformation"][row.get("transformation") or row.get("origin") or "unknown"].append(index)
+        if row["id"] in teacher:
+            groups["teacher"][teacher[row["id"]]].append(index)
     breakdown = {}
     for group_name, members in groups.items():
         breakdown[group_name] = {}

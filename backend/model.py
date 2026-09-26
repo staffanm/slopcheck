@@ -15,7 +15,7 @@ import onnxruntime as ort
 from transformers import AutoTokenizer
 
 from backend.semantic import check_assessable
-from backend.windowing import window_premise
+from backend.windowing import source_chunks, window_premise
 
 logger = logging.getLogger("slopcheck.classifier")
 
@@ -75,6 +75,7 @@ class ClaimClassifier:
             "misleading": 0.75
         }
         self.min_margin = 0.00
+        self.mode = "window"  # "window": one BM25 window; "chunks": every chunk scored, pooled
         self.model_name = "KB/bert-base-swedish-cased-int8"
         self.model_version = self.model_dir.name
         self.max_length = 512
@@ -104,6 +105,7 @@ class ClaimClassifier:
                     cal_data = json.load(f)
                     self.temperature = float(cal_data.get("temperature", self.temperature))
                     self.min_margin = float(cal_data.get("minimum_margin", self.min_margin))
+                    self.mode = cal_data.get("mode", self.mode)
                     if "thresholds" in cal_data:
                         self.thresholds.update(cal_data["thresholds"])
             except Exception as e:
@@ -140,6 +142,68 @@ class ClaimClassifier:
         if "token_type_ids" in enc:
             ort_inputs["token_type_ids"] = enc["token_type_ids"].astype(np.int64)
         return windowed_premise, token_length, self.session.run(None, ort_inputs)[0][0]
+
+    def _run(self, premise: str, claim: str) -> tuple[int, Optional[np.ndarray]]:
+        enc = self.tokenizer(premise, claim, max_length=self.max_length, truncation=True, return_tensors="np")
+        token_length = int(enc["input_ids"].shape[1])
+        if token_length > self.max_length:
+            return token_length, None
+        ort_inputs = {"input_ids": enc["input_ids"].astype(np.int64), "attention_mask": enc["attention_mask"].astype(np.int64)}
+        if "token_type_ids" in enc:
+            ort_inputs["token_type_ids"] = enc["token_type_ids"].astype(np.int64)
+        return token_length, self.session.run(None, ort_inputs)[0][0]
+
+    def chunk_logits(self, claim: str, sources: list[dict]) -> list[dict]:
+        """Scores every chunk of every source against the claim. Each entry
+        carries the chunk, its token length and its raw logits."""
+        self.load()
+        scored = []
+        for chunk in source_chunks(sources):
+            token_length, logits = self._run(chunk["premise"], claim)
+            if logits is not None:
+                scored.append({"chunk": chunk, "token_length": token_length, "logits": logits})
+        return scored
+
+    @staticmethod
+    def pool_chunks(chunk_probs: np.ndarray) -> tuple[np.ndarray, dict[int, int]]:
+        """Pools per-chunk class probabilities into one distribution. Support,
+        contradiction and overstatement are each as strong as the strongest
+        chunk; "unsupported" is as strong as the weakest chunk's unsupported
+        probability, so one aligned chunk defeats it. Returns the pooled
+        probabilities and, per class, the chunk that decided it."""
+        pooled = np.array([
+            chunk_probs[:, 0].max(), chunk_probs[:, 1].min(), chunk_probs[:, 2].max(), chunk_probs[:, 3].max()
+        ], dtype=np.float64)
+        deciding = {0: int(chunk_probs[:, 0].argmax()), 1: int(chunk_probs[:, 1].argmin()),
+                    2: int(chunk_probs[:, 2].argmax()), 3: int(chunk_probs[:, 3].argmax())}
+        return pooled / pooled.sum(), deciding
+
+    def pooled_logits(self, claim: str, sources: list[dict]) -> tuple[list[dict], Optional[np.ndarray], dict[int, int]]:
+        """Chunk mode: returns the scored chunks, the log of the pooled
+        probabilities (the "logits" that temperature and thresholds act on)
+        and the deciding chunk per class."""
+        scored = self.chunk_logits(claim, sources)
+        if not scored:
+            return scored, None, {}
+        raw = np.stack([entry["logits"] for entry in scored]).astype(np.float64)
+        raw = raw - raw.max(axis=1, keepdims=True)
+        chunk_probs = np.exp(raw) / np.exp(raw).sum(axis=1, keepdims=True)
+        for entry, probs in zip(scored, chunk_probs):
+            entry["scores"] = {ID2LABEL[i]: round(float(probs[i]), 4) for i in range(4)}
+        pooled, deciding = self.pool_chunks(chunk_probs)
+        return scored, np.log(np.clip(pooled, 1e-9, 1.0)), deciding
+
+    def logits_for(self, claim: str, sources: list[dict]) -> dict[str, Any]:
+        """One entry point for both modes: premise shown as evidence, token
+        length, logits (None when nothing fits) and chunk details."""
+        if self.mode == "chunks":
+            scored, logits, deciding = self.pooled_logits(claim, sources)
+            if logits is None:
+                return {"premise": "", "token_length": 0, "logits": None, "chunks": scored, "deciding": deciding}
+            return {"premise": "", "token_length": max(e["token_length"] for e in scored), "logits": logits,
+                    "chunks": scored, "deciding": deciding}
+        premise, token_length, logits = self.raw_logits(claim, sources)
+        return {"premise": premise, "token_length": token_length, "logits": logits, "chunks": [], "deciding": {}}
 
     def predict_claim(
         self,
@@ -219,7 +283,8 @@ class ClaimClassifier:
                 }
 
         self.load()
-        windowed_premise, token_length, raw_logits = self.raw_logits(claim, norm_sources)
+        run = self.logits_for(claim, norm_sources)
+        windowed_premise, token_length, raw_logits = run["premise"], run["token_length"], run["logits"]
 
         # Token guard
         if raw_logits is None:
@@ -296,6 +361,14 @@ class ClaimClassifier:
             f"conf={confidence:.3f}, margin={margin:.3f}, len={token_length}"
         )
 
+        chunk_summary = None
+        if run["chunks"]:
+            # The chunk that decided the predicted class is the evidence shown.
+            deciding = run["chunks"][run["deciding"][pred_idx]]
+            windowed_premise = deciding["chunk"]["premise"]
+            chunk_summary = [{"index": e["chunk"]["index"], "source_idx": e["chunk"]["source_idx"], "scores": e["scores"]}
+                             for e in run["chunks"]]
+
         evidence_entry = {
             "source": windowed_premise,
             "scores": scores
@@ -308,8 +381,13 @@ class ClaimClassifier:
             "margin": round(margin, 4),
             "predicted_class": predicted_class,
             "abstain_reason": abstain_reason,
+            # The client can lower these to force a judgment below the calibrated level.
+            "threshold": round(float(threshold), 4),
+            "minimum_margin": round(float(self.min_margin), 4),
             "token_length": token_length,
-            "unresolved_sources": unresolved
+            "unresolved_sources": unresolved,
+            "chunk_count": len(run["chunks"]) if run["chunks"] else None,
+            "chunks": chunk_summary,
         }
 
         return {

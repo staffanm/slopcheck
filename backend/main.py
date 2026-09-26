@@ -72,8 +72,12 @@ class Comparison(BaseModel):
     margin: Optional[float] = None
     predicted_class: Optional[str] = None
     abstain_reason: Optional[str] = None
+    threshold: Optional[float] = None
+    minimum_margin: Optional[float] = None
     token_length: Optional[int] = None
     unresolved_sources: Optional[list[str]] = None
+    chunk_count: Optional[int] = None
+    chunks: Optional[list[dict[str, Any]]] = None
 
 
 class MatchResponse(BaseModel):

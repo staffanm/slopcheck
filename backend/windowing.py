@@ -58,31 +58,10 @@ def estimate_tokens(text: str) -> int:
     return int(words * 1.35) + 5
 
 
-def window_premise(
-    claim: str,
-    sources: list[dict],
-    max_premise_tokens: int = 380,
-    tokenizer: Optional[Any] = None
-) -> str:
-    """
-    Extracts the most relevant paragraph(s) from the provided sources using BM25
-    relative to the claim, ensuring the premise fits comfortably within the model's
-    context limit (leaving space for the claim and special tokens).
-
-    If the formatted premise is already within `max_premise_tokens`, it is returned unchanged.
-    """
-    if not sources:
-        return ""
-
-    full_premise = format_premise(sources)
-    if tokenizer is not None:
-        full_len = len(tokenizer.encode(full_premise, add_special_tokens=False))
-    else:
-        full_len = estimate_tokens(full_premise)
-
-    if full_len <= max_premise_tokens:
-        return full_premise
-
+def candidate_chunks(sources: list[dict]) -> list[dict]:
+    """Splits every source into paragraph chunks (long paragraphs at sentence
+    boundaries, about 800 characters). Serving, calibration and training all
+    chunk through this function."""
     candidate_chunks = []
     for s_idx, s in enumerate(sources):
         citation = s.get("citation", f"Källa {s_idx + 1}")
@@ -126,19 +105,79 @@ def window_premise(
                     "text": p
                 })
 
-    if not candidate_chunks:
+    return candidate_chunks
+
+
+def chunk_premise(chunk: dict) -> str:
+    """The premise text the model sees for one chunk: the same header form as
+    format_premise gives a whole source."""
+    return f"[Källa {chunk['source_idx'] + 1}: {chunk['citation']}]\n{chunk['text']}"
+
+
+def source_chunks(sources: list[dict], min_chars: int = 120) -> list[dict]:
+    """Chunks for sentence-level alignment. Paragraphs shorter than `min_chars`
+    (headings, "Domskäl.", list stubs) are merged into the next chunk of the
+    same source so that no chunk is a bare label."""
+    merged: list[dict] = []
+    pending: Optional[dict] = None
+    for chunk in candidate_chunks(sources):
+        if pending is not None and pending["source_idx"] == chunk["source_idx"]:
+            chunk = {**chunk, "text": pending["text"] + "\n\n" + chunk["text"], "p_idx": pending["p_idx"]}
+            pending = None
+        elif pending is not None:
+            merged.append(pending)
+            pending = None
+        if len(chunk["text"]) < min_chars:
+            pending = chunk
+        else:
+            merged.append(chunk)
+    if pending is not None:
+        merged.append(pending)
+    for index, chunk in enumerate(merged):
+        chunk["index"] = index
+        chunk["premise"] = chunk_premise(chunk)
+    return merged
+
+
+def window_premise(
+    claim: str,
+    sources: list[dict],
+    max_premise_tokens: int = 380,
+    tokenizer: Optional[Any] = None
+) -> str:
+    """
+    Extracts the most relevant paragraph(s) from the provided sources using BM25
+    relative to the claim, ensuring the premise fits comfortably within the model's
+    context limit (leaving space for the claim and special tokens).
+
+    If the formatted premise is already within `max_premise_tokens`, it is returned unchanged.
+    """
+    if not sources:
+        return ""
+
+    full_premise = format_premise(sources)
+    if tokenizer is not None:
+        full_len = len(tokenizer.encode(full_premise, add_special_tokens=False))
+    else:
+        full_len = estimate_tokens(full_premise)
+
+    if full_len <= max_premise_tokens:
+        return full_premise
+
+    candidate_chunks_list = candidate_chunks(sources)
+    if not candidate_chunks_list:
         return full_premise[:1200]
 
-    corpus = [c["text"] for c in candidate_chunks]
+    corpus = [c["text"] for c in candidate_chunks_list]
     bm25 = SimpleBM25(corpus)
     scores = bm25.score(claim)
 
-    ranked_indices = sorted(range(len(candidate_chunks)), key=lambda i: scores[i], reverse=True)
+    ranked_indices = sorted(range(len(candidate_chunks_list)), key=lambda i: scores[i], reverse=True)
 
     selected = []
     accum_tokens = 0
     for idx in ranked_indices:
-        chunk = candidate_chunks[idx]
+        chunk = candidate_chunks_list[idx]
         header = f"[Källa {chunk['source_idx'] + 1}: {chunk['citation']}]\n"
         chunk_str = header + chunk["text"]
         if tokenizer is not None:

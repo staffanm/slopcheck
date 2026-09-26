@@ -41,3 +41,28 @@ def test_window_premise_long():
     result = window_premise(claim, sources, max_premise_tokens=150)
     assert "Paragraph 15" in result
     assert "godtrosförvärv" in result
+
+
+def test_source_chunks_merge_short_paragraphs_and_keep_headers():
+    from backend.windowing import source_chunks
+
+    sources = [
+        {"citation": "NJA 2020 s. 1", "text": "Domskäl i målet.\n\n" + "Första stycket handlar om en fråga. " * 6 + "\n\n" + "Andra stycket handlar om en annan fråga. " * 6},
+        {"citation": "3 § lagen", "text": "Kort regel som står ensam och är tillräckligt lång för att räknas som ett eget stycke i texten."},
+    ]
+    chunks = source_chunks(sources)
+    assert [c["source_idx"] for c in chunks] == [0, 0, 1]
+    assert chunks[0]["text"].startswith("Domskäl i målet.\n\nFörsta stycket")
+    assert chunks[0]["premise"].startswith("[Källa 1: NJA 2020 s. 1]\n")
+    assert chunks[2]["premise"].startswith("[Källa 2: 3 § lagen]\n")
+    assert [c["index"] for c in chunks] == [0, 1, 2]
+
+
+def test_pool_chunks_lets_one_aligned_chunk_defeat_unsupported():
+    import numpy as np
+    from backend.model import ClaimClassifier
+
+    probs = np.array([[0.05, 0.9, 0.03, 0.02], [0.8, 0.1, 0.05, 0.05], [0.1, 0.85, 0.03, 0.02]])
+    pooled, deciding = ClaimClassifier.pool_chunks(probs)
+    assert pooled.argmax() == 0 and deciding[0] == 1 and deciding[1] == 1
+    assert abs(pooled.sum() - 1.0) < 1e-9

@@ -109,6 +109,11 @@ def cut_dissent(text: str) -> str:
     return text
 
 
+def own_text(node: dict) -> str:
+    """A node's own text, without its children."""
+    return extract_node_text({"text": node.get("text", "")})
+
+
 def extract_node_text(node: Any) -> str:
     """Extracts raw plain text recursively from an AST node or text list."""
     if isinstance(node, str):
@@ -116,7 +121,9 @@ def extract_node_text(node: Any) -> str:
     if isinstance(node, list):
         return "".join(extract_node_text(item) for item in node)
     if isinstance(node, dict):
-        # If node has 'text' field
+        # A node's own text comes first, then its children (numbered points
+        # under a stycke, paragraphs under a heading).
+        own = ""
         if "text" in node:
             t = node["text"]
             if isinstance(t, list):
@@ -126,12 +133,11 @@ def extract_node_text(node: Any) -> str:
                         parts.append(item)
                     elif isinstance(item, dict) and "text" in item:
                         parts.append(item["text"])
-                return "".join(parts).strip()
+                own = "".join(parts).strip()
             elif isinstance(t, str):
-                return t.strip()
-        # If node has children
-        if "children" in node:
-            return "\n\n".join(filter(None, (extract_node_text(c) for c in node["children"])))
+                own = t.strip()
+        children = "\n\n".join(filter(None, (extract_node_text(c) for c in node.get("children", []))))
+        return "\n\n".join(filter(None, (own, children)))
     return ""
 
 
@@ -469,6 +475,9 @@ class CitedUnitResolver:
         sid_match = re.search(r"sid(\d+)", fragment) or re.search(r"s\.\s*(\d+)", citation)
         if sid_match:
             page_num = int(sid_match.group(1))
+        # "s. 83 f." means pages 83-84, "s. 83 ff." the following pages as well.
+        following = re.search(r"\bs\.\s*\d+\s*(ff?)\b\.?", citation)
+        extra_pages = {"f": 1, "ff": 2}.get(following.group(1), 0) if following else 0
 
         if page_num is None:
             return {
@@ -484,9 +493,13 @@ class CitedUnitResolver:
         structure = doc.get("structure", [])
         page_nodes = []
 
+        wanted_pages = set(range(page_num, page_num + extra_pages + 1))
+
         def collect_pages(node):
+            # Each node contributes its own text only; a section that starts on
+            # the page must not drag in the pages of all its children.
             if isinstance(node, dict):
-                if node.get("page") == page_num:
+                if node.get("page") in wanted_pages:
                     page_nodes.append(node)
                 for c in node.get("children", []):
                     collect_pages(c)
@@ -495,7 +508,7 @@ class CitedUnitResolver:
                     collect_pages(item)
 
         collect_pages(structure)
-        text = "\n\n".join(filter(None, (extract_node_text(n) for n in page_nodes))).strip()
+        text = "\n\n".join(filter(None, (own_text(n) for n in page_nodes))).strip()
 
         return {
             "status": "ok" if text else "abstain",
@@ -607,6 +620,12 @@ class CitedUnitResolver:
             all_text.append(extract_node_text(domslut_nodes))
 
         text = cut_dissent("\n\n".join(filter(None, all_text)).strip())
+        if re.search(r"i enlighet med betänkandet", text[:400], re.IGNORECASE):
+            # The court adopted the referent's proposal: its reasoning is the betänkande.
+            instans_children = deciding_instans.get("children", []) if deciding_instans else structure
+            betankande = [n for n in instans_children if isinstance(n, dict) and n.get("type") == "betankande"]
+            if betankande:
+                text = "\n\n".join(filter(None, (extract_node_text(betankande[-1]), text)))
         return {
             "status": "ok" if text else "abstain",
             "abstain_reason": None if text else "empty_unit",
@@ -624,10 +643,17 @@ class CitedUnitResolver:
         - Blanket: court's assessment (Prövning av tolkningsfrågan up to Rättegångskostnader).
         """
         # Determine pinpoint number if any
-        p_num = None
-        p_match = re.search(r"p(?:unkt)?\s*(\d+)", citation, re.IGNORECASE) or re.search(r"p(\d+)", fragment)
+        pinpoints: list[int] = []
+        p_match = (re.search(r"\bp(?:unkt(?:erna)?)?\.?\s*(\d+)(?:\s*(?:och|–|-|,)\s*(\d+))?", citation, re.IGNORECASE)
+                   or re.search(r"p(\d+)(?:-(\d+))?", fragment))
         if p_match:
-            p_num = int(p_match.group(1))
+            start_p = int(p_match.group(1))
+            end_p = int(p_match.group(2)) if p_match.group(2) else start_p
+            if start_p <= end_p <= start_p + 10:
+                pinpoints = list(range(start_p, end_p + 1))
+            else:
+                pinpoints = [start_p]
+        p_num = pinpoints[0] if pinpoints else None
 
         structure = doc.get("structure", [])
 
@@ -637,7 +663,7 @@ class CitedUnitResolver:
                 if isinstance(node, dict):
                     num_val = node.get("num") or node.get("ordinal")
                     try:
-                        if num_val is not None and int(num_val) == p_num:
+                        if num_val is not None and int(num_val) in pinpoints:
                             matched.append(node)
                     except (ValueError, TypeError):
                         pass
@@ -649,36 +675,47 @@ class CitedUnitResolver:
 
             find_cjeu_p(structure)
             text = "\n\n".join(filter(None, (extract_node_text(n) for n in matched))).strip()
+            source_id = f"{clean_uri}#p{p_num}" + (f"-{pinpoints[-1]}" if len(pinpoints) > 1 else "")
             return {
                 "status": "ok" if text else "abstain",
                 "abstain_reason": None if text else "pinpoint_not_found",
                 "text": text,
                 "unit_type": "cjeu_pinpoint",
                 "citation": citation,
-                "source_id": f"{clean_uri}#p{p_num}",
+                "source_id": source_id,
                 "document_id": clean_uri,
             }
 
         # Blanket citation: assessment section
+        # The judgment proper sits under the level-1 heading "Dom"; everything
+        # before it is the preamble (parties, judges, procedure).
+        judgment_nodes = [n for n in structure if isinstance(n, dict) and n.get("type") == "heading"
+                          and own_text(n).strip().lower() in ("dom", "domskäl", "beslut")]
+        body = judgment_nodes[-1].get("children", []) if judgment_nodes else structure
+        # The assessment starts at the first heading about the questions or the
+        # court's examination, or, failing that, right after the facts of the
+        # national case, and ends at "Rättegångskostnader".
+        assessment_keywords = ("prövning", "tolkningsfråg", "den första frågan", "bedömning", "domstolens svar",
+                               "frågan huruvida", "den enda frågan")
+        facts_keywords = ("nationella domstolen", "målet vid", "tvisten", "bakgrund")
+        headings = [(i, own_text(n).strip().lower()) for i, n in enumerate(body)
+                    if isinstance(n, dict) and n.get("type") == "heading"]
+        start = next((i for i, h in headings if any(h.startswith(kw) or re.match(r"^[ivx]+\s*[–-]\s*" + kw, h)
+                                                    for kw in assessment_keywords)), None)
+        if start is None:
+            facts = [i for i, h in headings if any(kw in h for kw in facts_keywords)]
+            start = facts[-1] + 1 if facts else None
         assessment_nodes = []
-        capturing = False
-        assessment_keywords = ("prövning av tolkningsfråga", "prövning av tolkningsfrågorna", "prövning av talan", "domstolens bedömning")
-
-        for node in structure:
-            if isinstance(node, dict):
-                heading = extract_node_text(node).lower()
-                if any(kw in heading for kw in assessment_keywords):
-                    capturing = True
-                elif "rättegångskostnader" in heading:
-                    capturing = False
+        if start is not None:
+            for node in body[start:]:
+                if isinstance(node, dict) and node.get("type") == "heading" and "rättegångskostnader" in own_text(node).lower():
                     break
-                if capturing:
-                    assessment_nodes.append(node)
+                assessment_nodes.append(node)
 
         text = "\n\n".join(filter(None, (extract_node_text(n) for n in assessment_nodes))).strip()
         if not text:
-            # Fallback to structure
-            text = extract_node_text(structure)
+            # No assessment heading found: the numbered paragraphs of the judgment.
+            text = extract_node_text(body)
 
         return {
             "status": "ok" if text else "abstain",
