@@ -64,9 +64,12 @@ export function citationSegments(block, occurrences) {
   return segments;
 }
 
-// The extract API splits a range such as "4-6 §§ räntelagen" into several
-// occurrences. Merge consecutive occurrences of one block into one finding when
-// only connector text (no letters) separates them and they share a base source.
+// The extract API splits a range such as "4-6 §§ räntelagen" or "4 och 6 §§
+// räntelagen (1975:635)" into several occurrences. Merge consecutive
+// occurrences of one block into one finding when only punctuation or a
+// coordinating word separates them and they share a base source.
+const CONNECTOR = /^[\s,–-]*(?:(?:och|samt|eller|respektive)[\s,]*)?$/u;
+
 export function mergeOccurrences(occurrences, blocks) {
   const blockText = id => blocks.find(block => block.id === id)?.text ?? '';
   const base = target => target.uri.split('#')[0];
@@ -78,7 +81,7 @@ export function mergeOccurrences(occurrences, blocks) {
     const a = previous && single(previous);
     const b = single(occurrence);
     if (a && b && a.block_id === b.block_id && b.start >= a.end
-      && !/\p{L}/u.test(blockText(a.block_id).slice(a.end, b.start))
+      && CONNECTOR.test(blockText(a.block_id).slice(a.end, b.start))
       && [...bases(occurrence)].some(uri => bases(previous).has(uri))) {
       const start = Math.min(a.start, b.start);
       const end = Math.max(a.end, b.end);
@@ -89,6 +92,11 @@ export function mergeOccurrences(occurrences, blocks) {
       continue;
     }
     merged.push({ ...occurrence, locations: [...occurrence.locations], targets: [...(occurrence.targets ?? [])] });
+  }
+  // "(1975:635)" after a provision names its act; it does not cite the whole act.
+  for (const occurrence of merged) {
+    const specific = new Set(occurrence.targets.filter(target => target.uri.includes('#')).map(base));
+    occurrence.targets = occurrence.targets.filter(target => target.uri.includes('#') || !specific.has(base(target)));
   }
   return merged;
 }
@@ -148,8 +156,12 @@ export function sentenceSegments(text, locations = []) {
   return result;
 }
 
+// True when nothing but reference wording is left once the citations are
+// removed: "Se …", "jfr …", "Detta följer även av …".
+export const REFERENCE_SENTENCE = /(?<!\p{L})(?:detta|det)\s+följer\s+(?:även\s+|också\s+)?(?:av|enligt)(?!\p{L})/giu;
+
 export function citationOnly(text) {
-  return !text.replace(/(?<!\p{L})(?:se|jfr|även|bl|a|t|ex|och)(?!\p{L})/giu, '').replace(/[^\p{L}\p{N}]/gu, '');
+  return !text.replace(REFERENCE_SENTENCE, '').replace(/(?<!\p{L})(?:se|jfr|även|bl|a|t|ex|och)(?!\p{L})/giu, '').replace(/[^\p{L}\p{N}]/gu, '');
 }
 
 export function claimContext(occurrence, blocks) {
@@ -165,9 +177,16 @@ export function claimContext(occurrence, blocks) {
     const segment = segments[index];
     if (!segment) continue;
     const withoutCitation = block.text.slice(segment.index, location.start) + block.text.slice(location.end, segment.index + segment.segment.length);
-    const contextStart = citationOnly(withoutCitation) && index > 0
-      && !/\n\s*\n/.test(block.text.slice(segments[index - 1].index, segment.index))
-      ? segments[index - 1].index : segment.index;
+    const samePara = index > 0 && !/\n\s*\n/.test(block.text.slice(segments[index - 1].index, segment.index));
+    // "…ansvarsområden. (Se prop. 2025/26:28, s. 149) Det finns…": a "(Se …)"
+    // after a full stop refers back. It belongs to the sentence before, and the
+    // sentence after it is not part of the claim.
+    const back = /^\s*\((?:se|jfr)\b[^()]*\)/iu.exec(segment.segment);
+    if (back && samePara && location.end <= segment.index + back[0].length) {
+      ranges.push({ block_id: block.id, start: segments[index - 1].index, end: segment.index + back[0].length });
+      continue;
+    }
+    const contextStart = citationOnly(withoutCitation) && samePara ? segments[index - 1].index : segment.index;
     ranges.push({ block_id: block.id, start: contextStart, end: segment.index + segment.segment.length });
     // A PDF page can end mid-sentence, before a stamp emitted out of reading
     // order. Join only an unambiguous lowercase continuation on the next page.

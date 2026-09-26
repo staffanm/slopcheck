@@ -1,4 +1,4 @@
-import { citationOnly, extractionText, sentenceSegments } from './analysis.js';
+import { citationOnly, extractionText, REFERENCE_SENTENCE, sentenceSegments } from './analysis.js';
 
 import manifest from './model-manifest.json' with { type: 'json' };
 
@@ -28,6 +28,13 @@ export const THRESHOLDS = {
   conflict: 0.50,
 };
 
+// "i förarbetena till cybersäkerhetslagen": the act is what the preparatory
+// works concern, not a source for the claim.
+function topicReference(block, location) {
+  return /(?:förarbetena|förarbeten|propositionen|betänkandet|lagrådsremissen|motiven)\s+till\s+(?:den\s+nya\s+|nya\s+)?$/iu
+    .test(block.text.slice(Math.max(0, location.start - 80), location.start));
+}
+
 // Work from locations, not string replacement: the same citation may appear in
 // several clauses, and a short parser span ("4") must never replace a date.
 function markedContext(context, occurrence, blocks, occurrences) {
@@ -36,7 +43,10 @@ function markedContext(context, occurrence, blocks, occurrences) {
     const block = blocks.find(b => b.id === range.block_id);
     let text = block.text.slice(range.start, range.end);
     const spans = occurrences.flatMap(o => o.locations).filter(loc => loc.block_id === range.block_id
-      && loc.start >= range.start && loc.end <= range.end).sort((a, b) => b.start - a.start);
+      && loc.start >= range.start && loc.end <= range.end && !topicReference(block, loc)
+      // A citation joined to a word ("NIS2-direktivet") is part of the wording and stays.
+      && !/^-?\p{L}/u.test(block.text.slice(loc.end, loc.end + 2)))
+      .sort((a, b) => b.start - a.start);
     let boundary = range.end;
     for (const span of spans) {
       if (span.end > boundary) continue;
@@ -79,6 +89,8 @@ export function semanticClaim(occurrence, context, blocks, occurrences = [occurr
   const authority = namedCourt?.toLocaleLowerCase('sv').replace(/^hd$/, 'högsta domstolen').replace(/^hfd$/, 'högsta förvaltningsdomstolen');
   const provisionStatement = /CITATION(?:\s*\(\d{4}:\d+\))?\s*,\s*(?:som\s+(?:stadgar|anger|föreskriver|innebär)|där\s+det\s+stadgas)\s+att\s+(.+)$/iu.exec(hypothesis);
   const directStatement = /^CITATION\s+(?:anger|stadgar|föreskriver)\s+att\s+(.+)$/iu.exec(hypothesis);
+  // "Tvärtom förtydligas det i förarbetena till X att …", "Av förarbetena framgår att …"
+  const worksStatement = /^(?:(?:tvärtom|vidare|dessutom|även|därtill|också),?\s+)?(?:(?:förtydligas|framgår|anges|sägs|uttalas|konstateras|betonas|klargörs|understryks)\s+det\s+(?:även\s+|också\s+)?i\s+(?:förarbetena|förarbeten|propositionen|motiven)(?:\s+till\s+.+?)?|av\s+(?:förarbetena|förarbeten|propositionen|motiven)(?:\s+till\s+.+?)?\s+framgår(?:\s+det)?)\s+att\s+(.+)$/iu.exec(hypothesis);
   // A reference about whether a source exists belongs to resolution, not NLI.
   const existenceClaim = !/(?<!\p{L})(?:enligt|i)\s+CITATION/iu.test(hypothesis)
     && (/(?:rättsfall\w*|lagrum\w*|hänvisning\w*)\s+(?:till\s+)?CITATION.*(?:finns\s+inte|inte\s+finns|existerar\s+inte|inte\s+existerar|existerar|är\s+påhitt\w*|var\s+(?:alltså\s+)?påhitt\w*|saknas|felaktig\w*)/iu.test(hypothesis)
@@ -91,17 +103,19 @@ export function semanticClaim(occurrence, context, blocks, occurrences = [occurr
   else if (inverted) hypothesis = inverted[3];
   else if (provisionStatement) hypothesis = provisionStatement[1];
   else if (directStatement) hypothesis = directStatement[1];
+  else if (worksStatement) hypothesis = worksStatement[1];
 
   // Remove parentheses only if their entire content consists of references.
   // Conditions like "(CITATION, men bara om ...)" must survive.
   hypothesis = hypothesis.replace(/\(([^()]*)\)/g, (whole, content) =>
     content.includes('CITATION') && citationOnly(content.replace(/CITATION/g, '')) ? '' : whole);
   hypothesis = hypothesis
+    .replace(new RegExp(`${REFERENCE_SENTENCE.source}\\s+CITATION[.,]?`, 'giu'), '')
     .replace(/(?<!\p{L})(?:se även|se|jfr)\s+CITATION[.,]?/giu, '')
     .replace(/(?<!\p{L})(?:enligt|i)\s+CITATION(?:\s+och\s+(?:CITATION|rättspraxis))?\s*/giu, '')
     .replace(/(?<!\p{L})enligt fast rättspraxis\s*/giu, '')
     .replace(/CITATION/g, '')
-    .replace(/\(\s*\)/g, '')
+    .replace(/\(\s*\)/g, '').replace(/,\s*,/g, ',')
     .replace(/\s+([,.;:])/g, '$1').replace(/\s+/g, ' ').trim();
   if (referenceOnly && block?.claimContext) {
     hypothesis = extractionText(block.claimContext).text;
@@ -115,6 +129,7 @@ export function semanticClaim(occurrence, context, blocks, occurrences = [occurr
   const before = block.text.slice(0, occurrence.locations[0].start);
   const heading = before.split(/\n/).filter(line => line.trim()).findLast(line => /^(?:#{1,6}\s*)?(?:källförteckning|referenser|rättsfallsförteckning|litteratur|bibliografi)\s*$/i.test(line.trim()));
   if (context.incomplete) reason = 'Påståendet är avbrutet vid en sid- eller styckegräns.';
+  else if (topicReference(block, occurrence.locations[0])) reason = 'Lagen anges som förarbetenas ämne, inte som källa för påståendet.';
   else if (existenceClaim) reason = 'Påståendet gäller källans existens och hanteras av hänvisningskontrollen.';
   else if (heading) reason = 'Hänvisningen står i en källförteckning.';
   else if (/<[^>]+>|\uFFFD/.test(hypothesis)) reason = 'Påståendet innehåller text som inte kunde läsas säkert.';

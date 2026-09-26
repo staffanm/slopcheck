@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Tokenizer } from '@huggingface/tokenizers';
 import { readFileSync } from 'node:fs';
-import { claimContext } from '../src/analysis.js';
+import { claimContext, mergeOccurrences } from '../src/analysis.js';
+import { extractLocal } from '../src/lagrum-extract.js';
 import { MODEL_VERSION, semanticClaim, semanticResult, scoresFromLogits, rowSemantic, matchesFilter, judgmentAt, localCandidate, serverCandidate } from '../src/semantic.js';
 import { modelPassages, pairInput, premiseWindow } from '../src/semantic-input.js';
 
@@ -135,4 +136,52 @@ test('a lower certainty level forces judgments under the calibrated threshold, f
   assert.equal(judgmentAt(local, candidate, 0.75).evidence.text, 'Ett anbud är bindande.');
   const conflicting = semanticResult([comparison('a', scores(0.98, 0.01, 0.01)), comparison('b', scores(0.01, 0.01, 0.98))], { thresholds: PROVISIONAL });
   assert.equal(localCandidate(conflicting, PROVISIONAL), null);
+});
+
+// Rows as main.js builds them from extractor output: merge, then context and claim.
+function rows(text, citations) {
+  const blocks = [{ id: 'text', text }];
+  const occurrences = mergeOccurrences(citations.map(([sub, ...uris]) => {
+    const start = text.indexOf(sub);
+    return { text: sub, locations: [{ block_id: 'text', start, end: start + sub.length }], targets: uris.map(uri => ({ uri })) };
+  }), blocks);
+  return occurrences.map(occurrence => {
+    const context = claimContext(occurrence, blocks);
+    return { occurrence, context, claim: semanticClaim(occurrence, context, blocks, occurrences) };
+  });
+}
+
+test('a "(Se …)" after a full stop supports the sentence before it; a law named as the subject of förarbetena is no source', () => {
+  // NIS2 memo; the footnote is inlined where its marker sits.
+  const text = 'Tvärtom förtydligas det i förarbetena till cybersäkerhetslagen att en verksamhetsutövare kan bedriva flera verksamheter som faller under olika tillsynsmyndigheters ansvarsområden. (Se prop. 2025/26:28, s. 149) Det finns ingenting som talar för att det ska göras skillnad mellan ”kärnverksamhet” och ”sidoverksamhet” i regelverket.';
+  const [law, prop] = rows(text, [['cybersäkerhetslagen', 'https://lagen.nu/2025:1506'], ['prop. 2025/26:28, s. 149', 'https://lagen.nu/prop/2025/26:28#sid149']]);
+  assert.equal(prop.claim.assessable, true);
+  assert.equal(prop.claim.hypothesis, 'en verksamhetsutövare kan bedriva flera verksamheter som faller under olika tillsynsmyndigheters ansvarsområden.');
+  assert.equal(law.claim.assessable, false);
+  assert.match(law.claim.reason, /förarbetenas ämne/);
+  // The sentence after the reference states what the source does not say; it is no claim.
+  for (const row of [law, prop]) assert.doesNotMatch(row.context.text, /kärnverksamhet/);
+});
+
+test('"4 och 6 §§ räntelagen (1975:635)" is one claim over 4 § and 6 §, not the whole act', () => {
+  const text = 'Detta regleras i 4 och 6 §§ räntelagen (1975:635), där det stadgas att dröjsmålsränta ska utgå från den dag då betalning skulle ha skett och tills betalning erläggs.';
+  const expected = 'dröjsmålsränta ska utgå från den dag då betalning skulle ha skett och tills betalning erläggs.';
+  // The lagen.nu extractor returns three occurrences.
+  const api = rows(text, [['4', 'https://lagen.nu/1975:635#P4'], ['6 §§', 'https://lagen.nu/1975:635#P6'], ['räntelagen (1975:635)', 'https://lagen.nu/1975:635']]);
+  assert.equal(api.length, 1);
+  assert.equal(api[0].occurrence.text, '4 och 6 §§ räntelagen (1975:635)');
+  assert.deepEqual(api[0].occurrence.targets.map(target => target.uri), ['https://lagen.nu/1975:635#P4', 'https://lagen.nu/1975:635#P6']);
+  assert.equal(api[0].claim.hypothesis, expected);
+  // The local extractor returns two, the second with the act as an extra target.
+  const blocks = [{ id: 'text', text }];
+  const local = mergeOccurrences(extractLocal(blocks), blocks);
+  assert.equal(local.length, 1);
+  assert.deepEqual(local[0].targets.map(target => target.uri), ['https://lagen.nu/1975:635#P4', 'https://lagen.nu/1975:635#P6']);
+});
+
+test('"Detta följer även av X" makes the sentence before it the claim, and a citation inside a word stays text', () => {
+  const text = 'Enligt artikel 6(39), NIS2-direktivet, avses med ”leverantör av utlokaliserade driftstjänster” en entitet som tillhandahåller tjänster som rör installation, förvaltning, drift eller underhåll av IKT-produkter på distans. Detta följer även av 1 kap. 2 § 22 p. cybersäkerhetslagen.';
+  const [, provision] = rows(text, [['NIS2', 'https://lagen.nu/celex/32022L2555'], ['1 kap. 2 § 22 p. cybersäkerhetslagen', 'https://lagen.nu/2025:1506#K1P2S1N22p']]);
+  assert.equal(provision.claim.assessable, true);
+  assert.equal(provision.claim.hypothesis, 'Enligt artikel 6(39), NIS2-direktivet, avses med ”leverantör av utlokaliserade driftstjänster” en entitet som tillhandahåller tjänster som rör installation, förvaltning, drift eller underhåll av IKT-produkter på distans.');
 });

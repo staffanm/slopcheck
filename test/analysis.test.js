@@ -269,7 +269,8 @@ test('mergeOccurrences joins a range into one finding but keeps distinct laws ap
   const merged = mergeOccurrences(occurrences, blocks);
   assert.equal(merged.length, 2);
   assert.equal(merged[0].text, '4-6 §§ räntelagen (1975:635)');
-  assert.deepEqual(merged[0].targets.map(target => target.uri), ['https://lagen.nu/1975:635#P4', 'https://lagen.nu/1975:635#P6', 'https://lagen.nu/1975:635']);
+  // "(1975:635)" names the act of the provisions; it is not a source of its own.
+  assert.deepEqual(merged[0].targets.map(target => target.uri), ['https://lagen.nu/1975:635#P4', 'https://lagen.nu/1975:635#P6']);
   assert.equal(merged[1].text, '4 § avtalslagen');
   assert.equal(merged[0].locations.length, 1);
 });
