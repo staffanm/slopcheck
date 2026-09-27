@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import pasted from './fixtures/pasted-line-wrap.json' with { type: 'json' };
 import { citationSegments, claimContext, claimSegments, classifyResolution, extractionText, invalidCitationMessage, mergeOccurrences, normalizeQuote, occurrenceStatus, originalOccurrences, pdfPageText, provisionText, selectEvidence, validateBlocks } from '../src/analysis.js';
-import { extract } from '../src/api.js';
+import { extract, EXTRACTION_OPTIONS } from '../src/api.js';
 import { extractLocal, getLocalParser } from '../src/lagrum-extract.js';
 
 test('a page pinpoint reads the cited pages in whole paragraphs', () => {
@@ -106,6 +106,55 @@ test('a PDF footnote moves inline at its marker and its citation is found in con
   const text = pdfPageText(items);
   assert.match(text, /fast praxis i svensk rätt om ansvar\. \(Se NJA 2013 s\. 502\.\)/);
   assert.doesNotMatch(text, /(^|\n)1 Se NJA/);
+});
+
+test('11 pt body text with 9 pt notes split into several items: every note moves inline and supports the sentence before it', () => {
+  // An LL.M. thesis page: the page number comes first, notes are 9 pt with a 6 pt
+  // number, and one note's text is split into three items.
+  const it = (str, y, height) => ({ str, transform: [1, 0, 0, 1, 64, y], height });
+  const items = [
+    it('37', 39, 9),
+    it('EU-domstolen bedömde att de skriftliga uppgifterna utgör personuppgifter.', 601, 11), it('92', 603, 6),
+    it('Nowak-målet tydliggjorde bedömningen av vad som ska anses utgöra personuppgifter.', 588, 11),
+    it('Domstolen konstaterar att uppgifterna ska avse en enskild person.', 576, 11), it('98', 578, 6),
+    it('Examinatorns anteckningar var bedömningar av hans prestationer.', 564, 11), it('99', 566, 6),
+    it('92', 107, 6), it('Mål C-434/16, Nowak. punkt. 62.', 105, 9),
+    it('98', 77, 6), it('Mål C-434/16 p. 53', 75, 9), it('–', 75, 9), it('54.', 75, 9),
+    it('99', 66, 6), it('Mål C-434/16, Nowak p. 46.', 64, 9),
+  ];
+  const text = pdfPageText(items);
+  assert.match(text, /personuppgifter\. \(Mål C-434\/16, Nowak\. punkt\. 62\.\) Nowak-målet/);
+  assert.match(text, /enskild person\. \(Mål C-434\/16 p\. 53 – 54\.\)/);
+  assert.doesNotMatch(text, /\b98 Mål/);
+  const block = { id: 'page', text };
+  const cite = 'Mål C-434/16';
+  const start = text.indexOf(cite);
+  const context = claimContext({ locations: [{ block_id: 'page', start, end: start + cite.length }] }, [block]);
+  assert.match(context.text, /^EU-domstolen bedömde att de skriftliga uppgifterna utgör personuppgifter\. \(Mål/);
+  assert.doesNotMatch(context.text, /Nowak-målet tydliggjorde/);
+  // The next note ends a later sentence of the same segment; its claim is that
+  // sentence, without the first note.
+  const second = text.indexOf(cite, start + 1);
+  const next = claimContext({ locations: [{ block_id: 'page', start: second, end: second + cite.length }] }, [block]);
+  assert.match(next.text, /^Domstolen konstaterar att uppgifterna ska avse en enskild person\. \(Mål C-434\/16 p\. 53/);
+  assert.doesNotMatch(next.text, /Nowak\. punkt\. 62/);
+  // Two notes in a row: the second sentence's claim does not start with the first note.
+  const third = text.indexOf(cite, second + 1);
+  const last = claimContext({ locations: [{ block_id: 'page', start: third, end: third + cite.length }] }, [block]);
+  assert.match(last.text, /^Examinatorns anteckningar var bedömningar av hans prestationer\. \(Mål C-434\/16, Nowak p\. 46\.\)$/);
+});
+
+test('the extraction options leave out a bare act, a law named in passing and a popular case name used as a word', () => {
+  // The same sentence as ferenda's test_whole_documents_and_case_names_leave_out_bare_mentions.
+  const text = 'Enligt GDPR gäller detta för alla. Artikel 17 i dataskyddsförordningen ger rätt till radering. '
+    + 'Strukturen i uppsatsen följer brottsbalken, NJA 2013 s. 502 och ”Strukturen” NJA 2024 s. 445 m.fl. Se även mål C-434/16, Nowak.';
+  const uris = found => found.map(o => [o.text, o.targets.map(t => t.uri.replace('https://lagen.nu/', ''))]);
+  const all = uris(extractLocal([{ id: 'text', text }]));
+  assert.ok(all.some(([cite]) => cite === 'GDPR') && all.some(([cite]) => cite === 'Strukturen') && all.some(([cite]) => cite === 'fl'));
+  assert.deepEqual(uris(extractLocal([{ id: 'text', text }], EXTRACTION_OPTIONS)), [
+    ['Artikel 17 i dataskyddsförordningen', ['celex/32016R0679#17']],
+    ['NJA 2013 s. 502', ['dom/nja/2013s502']], ['NJA 2024 s. 445', ['dom/nja/2024s445']],
+    ['mål C-434/16', ['celex/62016CJ0434']]]);
 });
 
 test('pdfPageText leaves a page without footnotes unchanged', () => {

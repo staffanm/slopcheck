@@ -142,7 +142,10 @@ export function sentenceSegments(text, locations = []) {
     .replace(/\b(?:t\.\s*ex|bl\.\s*a|d\.\s*v\.\s*s|dvs|m\.\s*fl|m\.\s*m|o\.\s*s\.\s*v|osv|p\.\s*g\.\s*a|s\.\s*k|jfr|prop|kap|st|bil|aktbil|nr|ref|not|avd|art|s|ff)\./gi, m => m.replace(/\./g, '_'))
     .replace(/(?:\b[A-ZÅÄÖ]\.)+(?=\s|[A-ZÅÄÖ])/g, m => m.replace(/\./g, '_'))
     .replace(/(^|\n)[^\p{L}\p{N}\r\n]*\d+(?:\.\d+)*\.(?=\s|\p{Lu})/gu, m => m.replace(/\./g, '_'))
-    .replace(/\d\.(?=\d)/g, m => m.replace('.', '_'));
+    .replace(/\d\.(?=\d)/g, m => m.replace('.', '_'))
+    // A parenthesis is one unit: an inlined note such as "(Mål C-434/16, Nowak. punkt. 62.)"
+    // must not end a sentence at "Nowak." or "punkt.".
+    .replace(/\([^()\n]{0,400}\)/g, m => m.replace(/[.!?]/g, '_'));
   for (const { start, end } of locations) masked = masked.slice(0, start)
     + masked.slice(start, end).replace(/[^\s]/g, 'X') + masked.slice(end);
   const result = [];
@@ -178,15 +181,22 @@ export function claimContext(occurrence, blocks) {
     if (!segment) continue;
     const withoutCitation = block.text.slice(segment.index, location.start) + block.text.slice(location.end, segment.index + segment.segment.length);
     const samePara = index > 0 && !/\n\s*\n/.test(block.text.slice(segments[index - 1].index, segment.index));
-    // "…ansvarsområden. (Se prop. 2025/26:28, s. 149) Det finns…": a "(Se …)"
-    // after a full stop refers back. It belongs to the sentence before, and the
-    // sentence after it is not part of the claim.
-    const back = /^\s*\((?:se|jfr)\b[^()]*\)/iu.exec(segment.segment);
+    // "…ansvarsområden. (Se prop. 2025/26:28, s. 149) Det finns…": a parenthesis
+    // after a full stop, such as an inlined footnote, refers back. It belongs to
+    // the sentence before, and the sentence after it is not part of the claim.
+    const leading = item => /^\s*\([^()]*\)/u.exec(item.segment);
+    const back = leading(segment);
+    // The sentence before starts after its own leading parenthesis, which is
+    // the note of the sentence before that.
+    const previousStart = samePara ? segments[index - 1].index + (leading(segments[index - 1])?.[0].length ?? 0) : 0;
     if (back && samePara && location.end <= segment.index + back[0].length) {
-      ranges.push({ block_id: block.id, start: segments[index - 1].index, end: segment.index + back[0].length });
+      ranges.push({ block_id: block.id, start: previousStart, end: segment.index + back[0].length });
       continue;
     }
-    const contextStart = citationOnly(withoutCitation) && samePara ? segments[index - 1].index : segment.index;
+    // A leading parenthesis that refers back belongs to the sentence before, so
+    // another citation in this segment starts its claim after it.
+    const own = back && samePara ? segment.index + back[0].length : segment.index;
+    const contextStart = citationOnly(withoutCitation) && samePara ? previousStart : own;
     ranges.push({ block_id: block.id, start: contextStart, end: segment.index + segment.segment.length });
     // A PDF page can end mid-sentence, before a stamp emitted out of reading
     // order. Join only an unambiguous lowercase continuation on the next page.
@@ -443,9 +453,20 @@ function inlinePdfFootnotes(lines) {
   }
   const bodyFont = [...chars.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
   if (!bodyFont) return null;
-  const lineFont = line => median(line.items.map(item => item.height));
+  // A line's font is the height that carries most of its characters, not
+  // counting a note number: a 9 pt note split into several items under 11 pt
+  // body text still reads as a note line.
+  const lineFont = line => {
+    const weights = new Map();
+    for (const item of line.items) {
+      if (/^\d{1,3}$/.test(item.str.trim())) continue;
+      const height = Math.round(item.height);
+      weights.set(height, (weights.get(height) ?? 0) + item.str.trim().length);
+    }
+    return [...weights.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? median(line.items.map(item => item.height));
+  };
   let start = lines.length;
-  while (start > 0 && lineFont(lines[start - 1]) <= bodyFont * 0.8) start--;
+  while (start > 0 && lineFont(lines[start - 1]) <= bodyFont * 0.9) start--;
   const region = lines.slice(start);
   if (!region.length || region.length > lines.length * 0.55) return null;
   const regionText = line => line.items.map(item => item.str).join(' ').replace(/\s+/g, ' ').trim();
@@ -455,6 +476,7 @@ function inlinePdfFootnotes(lines) {
   let current = null;
   for (const line of region) {
     const text = regionText(line);
+    if (/^\d{1,3}$/.test(text)) continue; // a page number below the notes
     const lead = /^(\d{1,3})[.)\]]?\s+(.*)$/.exec(text);
     if (lead) { current = lead[1]; notes.set(current, `${notes.has(current) ? `${notes.get(current)} ` : ''}${lead[2]}`); }
     else if (current) notes.set(current, `${notes.get(current)} ${text}`);
