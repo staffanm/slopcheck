@@ -28,6 +28,12 @@ export async function request(path, { signal, ...options } = {}) {
   }
 }
 
+// Slopcheck compares claims with provisions, articles, pages and judgments. A
+// law or EU act named as a whole ("GDPR", "brottsbalken") and a popular case
+// name used as a word ("strukturen") give nothing to compare, so the extractor
+// leaves them out (the same options in both modes).
+export const EXTRACTION_OPTIONS = { whole_documents: ['case', 'eu-case', 'echr', 'international-case'], case_names: 'with_identifier' };
+
 let extractionWorker;
 let activeJob;
 let nextJobId = 0;
@@ -57,7 +63,7 @@ function extractInWorker(blocks, signal) {
   signal?.addEventListener('abort', abort, { once: true });
   return new Promise((resolve, reject) => {
     activeJob = { id: ++nextJobId, resolve, reject };
-    extractionWorker.postMessage({ id: activeJob.id, blocks });
+    extractionWorker.postMessage({ id: activeJob.id, blocks, options: EXTRACTION_OPTIONS });
   }).finally(() => {
     signal?.removeEventListener('abort', abort);
     activeJob = undefined;
@@ -69,13 +75,13 @@ export async function extract(blocks, signal, { local = false } = {}) {
     signal?.throwIfAborted();
     if (typeof Worker === 'undefined') {
       const { extractLocal } = await import('./lagrum-extract.js');
-      return extractLocal(blocks);
+      return extractLocal(blocks, EXTRACTION_OPTIONS);
     }
     return extractInWorker(blocks, signal);
   }
   const normalized = blocks.map(block => ({ id: block.id, ...extractionText(block.text) }));
   const body = JSON.stringify(normalized.length === 1 && normalized[0].id === 'text'
-    ? { text: normalized[0].text } : { blocks: normalized.map(({ id, text }) => ({ id, text })) });
+    ? { text: normalized[0].text, ...EXTRACTION_OPTIONS } : { blocks: normalized.map(({ id, text }) => ({ id, text })), ...EXTRACTION_OPTIONS });
   if (new TextEncoder().encode(body).length > 2000000) throw new Error('Texten överskrider API:ts gräns på 2 MB.');
   const response = await request('citations/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal });
   if (response.offset_unit !== 'utf-16' || !Array.isArray(response.occurrences)) throw new Error('API:t returnerar ett oväntat textformat.');

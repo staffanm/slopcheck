@@ -1,4 +1,5 @@
 import {
+  ABBREVIATIONS_DATA,
   CITATION_NAMES,
   CITATION_SERIES,
   FS_SLUG,
@@ -16,6 +17,7 @@ import {
   FORESKRIFT,
   LAGRUM,
   LagrumParser,
+  lagrumUri,
 } from './lagrum.js';
 import * as treatyref from './treatyref.js';
 
@@ -181,10 +183,43 @@ export function resolveDv(q) {
   return null;
 }
 
+// Every law nickname and abbreviation as [alias, lawid], longest first, as
+// ferenda's resolve._leading_laws: "brottsbalken" before a shorter alias.
+let leadingLaws = null;
+function getLeadingLaws() {
+  leadingLaws ??= [...Object.entries(NAMEDLAWS_DATA.current), ...Object.entries(ABBREVIATIONS_DATA.current)]
+    .sort((a, b) => b[0].length - a[0].length);
+  return leadingLaws;
+}
+
+// [lawid, remainder] when the query opens with a known law nickname or
+// abbreviation (case-insensitively, at a word boundary), as ferenda's
+// resolve._split_leading_law: "BrB 12:1", "FL".
+function splitLeadingLaw(q) {
+  const low = q.toLowerCase();
+  for (const [alias, lawid] of getLeadingLaws()) {
+    const a = alias.toLowerCase();
+    if (low.startsWith(a) && (low.length === a.length || !/[\p{L}\p{N}]/u.test(low[a.length]))) {
+      return [lawid, q.slice(alias.length).trim()];
+    }
+  }
+  return null;
+}
+
 export function resolveSfs(q) {
   const span = NAMED_SPANS[q.trim().toLowerCase()];
   if (span) {
     return `https://lagen.nu/${span.lawid}${span.first ? '#' + span.first : ''}`;
+  }
+  const leading = splitLeadingLaw(q.trim());
+  if (leading) {
+    const [lawid, rem] = leading;
+    if (rem) {
+      const pins = getSfsParser().parse_text(normalizePinpoint(rem), { law: lawid });
+      const frag = pins.find(r => r.uri.includes('#'));
+      if (frag) return frag.uri;
+    }
+    return lagrumUri({ law: lawid });
   }
   const sfsnr = /^(?:SFS\s+)?(\d{4}:\d{1,4}(?:_s\.\d+)?)(?:\s+(.*))?$/i.exec(q.trim());
   if (sfsnr) {

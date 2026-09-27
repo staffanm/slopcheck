@@ -9,6 +9,7 @@ import {
   CITATION_NAMES,
   FS_SLUG,
   NAMEDACTS_DATA,
+  NAMEDCASES_DATA,
   NAMEDLAWS_DATA,
 } from './lagrum/datasets.js';
 import { resolve } from './lagrum/resolve.js';
@@ -50,20 +51,33 @@ const _PINPOINT = "(?:[0-9]+\\s*[a-z]?\\s*kap\\.?\\s*)?[0-9]+(?:\\s?[a-z]\\b)?\\
 const _BEFORE_PROVISION = new RegExp(_PINPOINT + "(?:\\s+i)?\\s*$", "i");
 const _AFTER_PROVISION = new RegExp("^\\s+(?:" + _PINPOINT + "|[0-9]+:[0-9]+[a-z]?)", "i");
 
-let cachedNamesRe = null;
-function getNamesRegex() {
-  if (!cachedNamesRe) {
-    const escaped = (CITATION_NAMES || []).map(name =>
+// The same options as lagen.nu's /api/v1/citations/extract (ferenda's
+// citationextract.extract): kinds, whole_documents and case_names.
+const SOURCE_KINDS = { sfs: 'sfs', foreskrift: 'foreskrift', dv: 'case', hudoc: 'echr', forarbete: 'preparatory',
+  coe: 'treaty', untc: 'treaty', icrc: 'treaty', icc: 'international-case', icj: 'international-case',
+  avg: 'decision', guidance: 'guidance', rs: 'guidance' };
+
+export function targetKind(uri, source) {
+  if (source === 'eurlex') return uri.startsWith('https://lagen.nu/celex/6') ? 'eu-case' : 'eu-act';
+  return SOURCE_KINDS[source] ?? null;
+}
+
+const cachedNamesRe = new Map();
+function getNamesRegex(caseNames = true) {
+  if (!cachedNamesRe.has(caseNames)) {
+    // Without case names, a popular case name alone ("Strukturen") is not a candidate.
+    const names = caseNames ? CITATION_NAMES || [] : (CITATION_NAMES || []).filter(name => !Object.hasOwn(NAMEDCASES_DATA, name.toLowerCase()));
+    const escaped = names.map(name =>
       name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+')
     );
-    cachedNamesRe = new RegExp(
+    cachedNamesRe.set(caseNames, new RegExp(
       "(?<![\\w\\u00E5\\u00E4\\u00F6\\u00C5\\u00C4\\u00D6])(?:" + escaped.join("|") +
       ")(?![\\w\\u00E5\\u00E4\\u00F6\\u00C5\\u00C4\\u00D6])(?:\\s+(?:art(?:ikel|icle)?\\.?\\s*)?" +
       "[0-9]+(?:\\s*kap\\.?\\s*[0-9]+\\s*§|[.:][0-9]+|\\s*§)?)?",
       "gi"
-    );
+    ));
   }
-  return cachedNamesRe;
+  return cachedNamesRe.get(caseNames);
 }
 
 let cachedRegsRe = null;
@@ -75,13 +89,13 @@ function getRegulationsRegex() {
   return cachedRegsRe;
 }
 
-function* candidates(value) {
+function* candidates(value, caseNames = true) {
   const regsRe = getRegulationsRegex();
   const patterns = [
     _IDENTIFIERS,
     _NJA,
     _ICJ_REPORT,
-    getNamesRegex(),
+    getNamesRegex(caseNames),
     regsRe,
   ];
 
@@ -119,7 +133,11 @@ function* candidates(value) {
   }
 }
 
-export function extractLocal(blocks) {
+// kinds limits the targets to those kinds; whole_documents lists the kinds whose
+// document may be cited without a provision, article or page; case_names
+// "with_identifier" drops a popular case name that stands alone. Defaults
+// return everything. An occurrence left with no targets is dropped.
+export function extractLocal(blocks, { kinds = null, whole_documents: wholeDocuments = null, case_names: caseNames = 'bare' } = {}) {
   const normalized = blocks.map(block => ({ id: block.id, ...extractionText(block.text) }));
   const value = normalized.map(b => b.text).join('\n');
   const parser = getLocalParser();
@@ -143,7 +161,7 @@ export function extractLocal(blocks) {
     }
 
     const interpreted = new Map();
-    for (const [start, end] of candidates(value)) {
+    for (const [start, end] of candidates(value, caseNames !== 'with_identifier')) {
       const key = `${start},${end}`;
       const query = value.slice(start, end).split(/\s+/).join(' ');
       const isNja = /^\bNJA\s+[0-9]{4}\s*s\.?\s*-?[0-9]+(?:\s*[-–]\s*[0-9]+|[.,][0-9]+)?(?:\s+[IVX]+\b)?$/i.test(query);
@@ -185,7 +203,11 @@ export function extractLocal(blocks) {
     }
 
     const occurrences = [];
-    for (const { start, end, targets } of selected) {
+    for (const { start, end, targets: found } of selected) {
+      const targets = kinds || wholeDocuments ? new Map([...found].filter(([uri, source]) =>
+        (!kinds || kinds.includes(targetKind(uri, source)))
+        && (!wholeDocuments || uri.includes('#') || wholeDocuments.includes(targetKind(uri, source))))) : found;
+      if (found.size && !targets.size) continue;
       const locations = [];
       for (let i = 0; i < normalized.length; i++) {
         const bStart = starts[i];
