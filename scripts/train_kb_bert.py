@@ -188,6 +188,8 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--no-header-augmentation", action="store_true",
                         help="Train only on the citation header, not also on unit-type and generic headers.")
+    parser.add_argument("--gradient-checkpointing", action="store_true",
+                        help="Recompute activations in the backward pass, so a large model fits in GPU memory.")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -208,8 +210,12 @@ def main():
         args.model_name,
         num_labels=4,
         id2label=ID2LABEL,
-        label2id=LABEL2ID
+        label2id=LABEL2ID,
+        # An NLI model's three-label head is replaced by a new four-label head.
+        ignore_mismatched_sizes=True,
     )
+    if args.gradient_checkpointing:
+        model.gradient_checkpointing_enable()
     model.to(device)
 
     print("Preparing datasets with BM25 paragraph windowing...")

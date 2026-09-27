@@ -30,7 +30,10 @@ const FORBIDDEN = {
   unsupported: ['supported', 'correct'],
 };
 const THREE_WAY = { supported: 'entailment', unsupported: 'neutral', incorrect: 'contradiction', misleading: 'neutral' };
-const STATUS_TO_THREE = { correct: 'entailment', supported: 'entailment', missing: 'neutral', incorrect: 'contradiction', contradiction: 'contradiction' };
+const STATUS_TO_THREE = { correct: 'entailment', supported: 'entailment', missing: 'neutral', incorrect: 'contradiction', contradiction: 'contradiction', misleading: 'neutral' };
+// Four-label weights score supported/unsupported/incorrect/misleading; compare them three-way.
+const SCORE_TO_THREE = { entailment: 'entailment', neutral: 'neutral', contradiction: 'contradiction',
+  supported: 'entailment', unsupported: 'neutral', misleading: 'neutral', incorrect: 'contradiction' };
 
 const server = await createServer({ root: root.pathname, server: { port: 5190, strictPort: true }, logLevel: 'error' });
 await server.listen();
@@ -86,7 +89,9 @@ await server.close();
 const median = values => values.sort((a, b) => a - b)[Math.floor(values.length / 2)];
 const assessedLegal = legal.filter(item => item.status !== 'unassessable');
 const scored = partition.filter(item => item.scores);
-const argmax = scores => Object.entries(scores).sort((a, b) => b[1] - a[1])[0][0];
+const top = scores => Object.entries(scores).sort((a, b) => b[1] - a[1])[0][0];
+const argmax = scores => SCORE_TO_THREE[top(scores)];
+const fourLabel = scored.length && 'supported' in scored[0].scores;
 const accepted = partition.filter(item => STATUS_TO_THREE[item.status]);
 const confusion = {};
 for (const item of scored) {
@@ -112,6 +117,7 @@ const summary = {
     accepted_by_label: Object.fromEntries(['entailment', 'neutral', 'contradiction'].map(label => [label,
       accepted.filter(item => STATUS_TO_THREE[item.status] === label).length])),
     confusion,
+    ...(fourLabel ? { four_label_argmax_accuracy: scored.filter(item => top(item.scores) === item.label).length / scored.length } : {}),
     median_ms: Math.round(median(partition.map(item => item.ms))),
   },
 };

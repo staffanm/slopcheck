@@ -31,3 +31,26 @@ Apart from the failure to extract a claim, the citation is specifically to p. 12
 lagen.nu kan inte bekräfta källan.
 
 We don't keep NJA cases before 1981. We can tell that this is a valid citation though because it has been named in https://www.domstol.se/globalassets/filer/domstol/hogstadomstolen/namngivna-rattsfall/officiell-lista-over-namngivna-rattsfall.pdf which we ingest for the dv source. Maybe lagen.nu should create placeholder/ghost entries for the 130 such cases?
+## Improving the server model (26 September 2026)
+
+On the corrected legal-claims fixture, Gemma 4 31B with a prompt reaches 0.96 precision while
+KB-BERT v5 reaches 0.60 (top label). Both read one claim against one source, so the gap is not
+the task. Ideas, in the order I expect them to matter:
+
+1. Train on real pairs labelled by a strong judge. v5 learns from rule-made pairs (rewrites,
+   neighbour chunks, swapped sources) and is nearly as good as Gemma on those, but not on
+   hand-written claims. Have Gemma 4 31B (run-gemma4.sh, about 11 s per pair on the 3090) label
+   authentic corpus claims with their cited sources, and claims from real documents run through
+   the extractor; distil the server model from those labels. The same labels then improve the
+   browser student.
+2. Give the model the context the claim needs. v5 reads one BM25 window of 380 tokens; Gemma read
+   the whole cited unit. Several fixture failures need text outside the window (an exception in
+   a later paragraph, HD's conclusion pages away from the matching words). Rank passages with a
+   cross-encoder instead of BM25, and add the section's exceptions to the window.
+3. A larger encoder. The server is not bound by the 25 MB browser limit. Candidates from KBLab:
+   - KBLab/megatron-bert-large-swedish-cased-165-zero-shot: 370 M parameters (3 times KB-BERT),
+     already fine-tuned on Swedish QNLI and MNLI, so it starts as an NLI model;
+   - KBLab/megatron-bert-large-swedish-cased-165k: the same model before NLI fine-tuning;
+   - KBLab/electra-base-swedish-cased-discriminator: base size, an alternative to KB-BERT.
+   Measure CPU latency on ludo (3 threads) before choosing; a large model is roughly 3 times
+   slower per claim than v5.
