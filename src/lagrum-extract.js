@@ -25,6 +25,9 @@ export function getLocalParser() {
       named_acts: NAMEDACTS_DATA,
       parse_types: ALL_PARSE_TYPES,
     });
+    // submitted text cites the recitals of the act it discusses bare, as in
+    // ferenda's citation_parser ("Under skäl 26 …")
+    defaultParser.bare_recitals = true;
   }
   return defaultParser;
 }

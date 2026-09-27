@@ -422,6 +422,31 @@ describe('Lagrum Unit Tests', () => {
       [['artikel 2', 'https://lagen.nu/celex/31995L0046#2']]);
   });
 
+  it('judgment paragraphs, "art.", a dotted letter, recitals and the working party, as in ferenda', () => {
+    const GDPR = 'https://lagen.nu/celex/32016R0679';
+    const parser = new LagrumParser(NAMEDLAWS_DATA, {
+      basefile: 'dom', parse_types: [EULAGSTIFTNING, EURATTSFALL], named_acts: NAMEDACTS_DATA,
+    });
+    parser.reset();
+    const links = text => parser.parse_text(text, {}).map(r => [r.text, r.uri]);
+    assert.deepEqual(links('Se Mål C-434/16, Nowak p. 34–35 och mål C-136/17, GC m.fl. mot Commission nationale (CNIL), p. 57.'), [
+      ['Mål C-434/16, Nowak p. 34', 'https://lagen.nu/celex/62016CJ0434#point-34'],
+      ['35', 'https://lagen.nu/celex/62016CJ0434#point-35'],
+      ['mål C-136/17, GC m.fl. mot Commission nationale (CNIL), p. 57', 'https://lagen.nu/celex/62017CJ0136#point-57'],
+    ]);
+    assert.deepEqual(links('i mål C-131/12. Detta p. 5 är fel.'), [['mål C-131/12', 'https://lagen.nu/celex/62012CJ0131']]);
+    assert.deepEqual(links('Dataskyddsförordningen gäller, art. 4.2 GDPR och artikel 17.1.b GDPR.'), [
+      ['art. 4.2 GDPR', `${GDPR}#4.2`], ['artikel 17.1.b GDPR', `${GDPR}#17.1.b`],
+    ]);
+    assert.deepEqual(links('brott av allvarlig art 5 gånger'), []);
+    assert.deepEqual(links('den tidigare artikel 29arbetsgruppen'), []);
+    assert.deepEqual(links('den tidigare artikel 29- arbetsgruppen'), []);
+    assert.deepEqual(links('se Art. 29 Data Protection Working Party'), []);
+    assert.deepEqual(links('Under skäl 26 fastställs det'), []);
+    parser.bare_recitals = true;
+    assert.deepEqual(links('Under skäl 26 fastställs det'), [['skäl 26', `${GDPR}#recital-26`]]);
+  });
+
   it('eu namedact articles and anaphora', () => {
     const GDPR = 'https://lagen.nu/celex/32016R0679';
     const parser = new LagrumParser(NAMEDLAWS_DATA, {

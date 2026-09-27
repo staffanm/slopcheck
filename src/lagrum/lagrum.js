@@ -69,6 +69,22 @@ const ABSORB_MARKERS = new Set([
   'PIECE_DIGIT', 'SENTENCE_WORD', 'KAP', 'MOM', 'PUNKTEN', 'ITEM_CHAR'
 ]);
 
+// a bare recital ("skäl 26"), linked only where the caller opts in (bare_recitals)
+const BARE_RECITAL_PARTS = new Set(['eu_ref', 'skal_part', 'skal_item', 'skal_ref_id']);
+
+// "artikel 29-gruppen" is the working party, not an article, as in ferenda: a
+// PDF line break loses the hyphen or keeps a space after it, "arbetargruppen"
+// is misspelt, and a footnote may use the English name
+const RE_ARTICLE29_GROUP = /^(?:[-‑‐–—]?\s?(?:arbets|arbetar)?gruppen|\s(?:Data Protection )?Working Party)/;
+
+// A judgment's paragraphs cited after its case number, as in ferenda's
+// RE_ECJ_POINTS: ", p. 54-59", " Nowak p. 34–35", ", Nowak. punkt. 53".
+const ECJ_POINT_WORD = String.raw`(?:p\.|pp\.|punkt(?:en|erna)?\.?|para\.?)`;
+const RE_ECJ_POINTS = new RegExp(
+  String.raw`(?:,?\s(?:m\.fl\.|[^\s\d.,;:()]+)(?:\s(?:m\.fl\.|[^\s\d.,;:()]+)){0,11}(?:\s\([^()\d]{1,40}\))?)?`
+  + String.raw`[.,]?\s?` + ECJ_POINT_WORD + String.raw`\s?(\d+(?:\s?[-–]\s?\d+)?`
+  + String.raw`(?:(?:,\s?|\s(?:och|samt)\s)(?:` + ECJ_POINT_WORD + String.raw`\s?)?\d+(?:\s?[-–]\s?\d+)?)*)`, 'y');
+
 const BARE_PARTS = new Set([
   'eu_ref', 'artikel_part', 'artikel_item',
   'artikel_ref_id', 'underartikel_ref_id', 'punkt_ref_id',
@@ -598,6 +614,8 @@ export class LagrumParser {
 
     this.lark = this._buildLark(requested, this.parse_types, abbrevs, eu_acts, lang);
     this.trigger = buildTrigger(this.parse_types, lang);
+    // link a bare "skäl N" to the act in focus (see BARE_RECITAL_PARTS)
+    this.bare_recitals = false;
     this.act_mention = this.parse_types.has(EULAGSTIFTNING) && lang === 'swe'
       ? actMentionPattern(eu_acts) : null;
     this.emd = requested.has(EMDRATTSFALL);
@@ -665,6 +683,7 @@ export class LagrumParser {
     this.written = written;
     this._scan_text = '';
     this._scan_base = 0;
+    this._scan_extend = 0;
   }
 
   parse_text(text, fragment = null, context = null, predicate = 'dcterms:references') {
@@ -688,15 +707,21 @@ export class LagrumParser {
 
     this.trigger.lastIndex = 0;
     let m;
-    let pos = 0;
+    // how far bare act names have been read; a match that linked nothing stays
+    // unread, since a trigger fires inside a name too ("Dataskyddsförordningen")
+    let mentions = 0;
     while ((m = this.trigger.exec(text)) !== null) {
       const start = m.index;
-      this._remember_act_mentions(text, pos, start);
+      if (start > mentions) {
+        this._remember_act_mentions(text, mentions, start);
+        mentions = start;
+      }
       const [tree, length] = this.try_parse(text, start);
       if (tree !== null && this.acceptable(tree, text, start, start + length)) {
         const base = start;
         this._scan_text = text;
         this._scan_base = base;
+        this._scan_extend = 0;
         try {
           const attrlist = this.format_root(tree, context);
           const spans = linkSpans(attrlist, tree, length);
@@ -723,13 +748,14 @@ export class LagrumParser {
         } catch (err) {
           if (!(err instanceof NoLink)) throw err;
         }
-        this.trigger.lastIndex = start + length;
+        // a judgment's paragraphs follow its case number (_ecj_points)
+        this.trigger.lastIndex = Math.max(start + length, this._scan_extend);
+        if (refs.length && refs.at(-1).start >= base) mentions = this.trigger.lastIndex;
       } else {
         this.trigger.lastIndex = start + 1;
       }
-      pos = this.trigger.lastIndex;
     }
-    this._remember_act_mentions(text, pos, text.length);
+    if (text.length > mentions) this._remember_act_mentions(text, mentions, text.length);
 
     let result = refs;
     if (this.eng) {
@@ -770,7 +796,9 @@ export class LagrumParser {
         const upto = err.pos_in_stream;
         if (!upto) return [null, 0];
         if (upto >= window.length) {
-          window = window.replace(/\S+$/, '');
+          // ferenda's lark reports the end of input as position -1, so its
+          // window[:upto] drops the last character ("artikel 6.1." -> "artikel 6.1")
+          window = window.slice(0, -1);
         } else {
           window = window.slice(0, upto);
         }
@@ -796,6 +824,11 @@ export class LagrumParser {
       if (RE_OTHER_ISSUER.test(pre) && !RE_EDPB_SELF.test(pre)) {
         return false;
       }
+    }
+    // "artikel 29-gruppen" is the working party, not the article
+    if (node instanceof Tree && node.data === 'eu_ref'
+        && text.slice(0, end).trimEnd().endsWith('29') && RE_ARTICLE29_GROUP.test(text.slice(end))) {
+      return false;
     }
     if (node instanceof Tree && node.data === 'wp_ref') {
       const number = tokenText(subtree(node, 'wp_id'));
@@ -1200,7 +1233,8 @@ export class LagrumParser {
   }
 
   _act_span(node) {
-    return nodeSpan(subtree(node, 'rattsakt_part'));
+    // the act, or its short name first ("GDPR skäl 14")
+    return nodeSpan(subtree(node, 'rattsakt_part', null) ?? subtree(node, 'eu_namnakt'));
   }
 
   _emit_uris(out, specs, node, build) {
@@ -1254,9 +1288,25 @@ export class LagrumParser {
       return;
     }
 
+    // a bare "skäl N": the act in focus, where the caller opted in
+    if ([...parts].every(p => BARE_RECITAL_PARTS.has(p))) {
+      const end = this._scan_base + nodeSpan(node)[1];
+      const tail = this._scan_text.slice(end, end + 14);
+      const target = this.state.self_eu_act || this.state.last_eu_act;
+      if (!this.bare_recitals || !target || /^\s+(?:i|till)\s|^\s*(?:,|och|eller)\s*\d/.test(tail)) {
+        throw new NoLink();
+      }
+      this._emit_recitals(out, node, this._eu_celex_uri(target, NO_PINPOINT, false));
+      return;
+    }
+
     let isBare = true;
     for (const p of parts) {
       if (!BARE_PARTS.has(p)) { isBare = false; break; }
+    }
+    // "art" without its dot is also a noun, so it links only with an act named
+    if (isBare && treeTokens(node).some(t => t.type === 'ARTIKEL' && t.value.toLowerCase() === 'art')) {
+      throw new NoLink();
     }
 
     if (parts.has('eu_generic') || isBare) {
@@ -1473,7 +1523,26 @@ export class LagrumParser {
       throw new NoLink();
     }
     const celex = `6${year}${decision}J${String(parseInt(serial, 10)).padStart(4, '0')}`;
-    out.push({ _uri: this.base + 'celex/' + celex });
+    const points = this._ecj_points(node);
+    if (!points.length) {
+      out.push({ _uri: this.base + 'celex/' + celex });
+      return;
+    }
+    // the first paragraph takes the case number with it, as a förarbete's first page does
+    points.forEach(([number, [start, stop]], index) => {
+      out.push({ _uri: `${this.base}celex/${celex}#point-${number}`, _span: [index === 0 ? nodeSpan(node)[0] : start, stop] });
+    });
+  }
+
+  // The judgment paragraphs after the case number, as [number, window span].
+  _ecj_points(node) {
+    RE_ECJ_POINTS.lastIndex = this._scan_base + nodeSpan(node)[1];
+    const m = RE_ECJ_POINTS.exec(this._scan_text);
+    if (!m) return [];
+    this._scan_extend = m.index + m[0].length;
+    const from = this._scan_extend - m[1].length;
+    return [...m[1].matchAll(/\d+/g)].map(n => [Number(n[0]),
+      [from + n.index - this._scan_base, from + n.index + n[0].length - this._scan_base]]);
   }
 
   // FORESKRIFT
