@@ -167,13 +167,16 @@ export function citationOnly(text) {
   return !text.replace(REFERENCE_SENTENCE, '').replace(/(?<!\p{L})(?:se|jfr|även|bl|a|t|ex|och)(?!\p{L})/giu, '').replace(/[^\p{L}\p{N}]/gu, '');
 }
 
-// A sentence that starts like this refers back to the sentence before it.
-export const REFERS_BACK = /^(?:han|hon)\b|^(?:detta|det|den|de)\s+(?:är|var|ska|kan|gäller|följer|innebär)\b/i;
+// A sentence that starts like this refers back to the sentence before it. An
+// impersonal "Det är möjligt att …" or "Det kan konstateras att …" does not.
+const REFERS_BACK = /^(?:han|hon)\b|^(?:detta|det|den|de)\s+(?:är|var|ska|kan|gäller|följer|innebär)\b/i;
+const IMPERSONAL = /^det\s+(?:är|var|ska|kan|bör|måste)\s+(?:\p{L}+\s+){0,2}att\b/iu;
+export const refersBack = text => REFERS_BACK.test(text) && !IMPERSONAL.test(text);
 
 // "…sker utanför EU. Det gäller även … (Jfr prop. …)": the claim starts one
 // sentence earlier, if that sentence is in the same paragraph and cites nothing.
 function referBack(block, segments, i, start, occurrences) {
-  if (i < 1 || !REFERS_BACK.test(block.text.slice(start).trimStart())) return start;
+  if (i < 1 || !refersBack(block.text.slice(start).trimStart())) return start;
   if (/\n\s*\n/.test(block.text.slice(segments[i - 1].index, segments[i].index))) return start;
   // The sentence before starts after the last note in its segment ("… hindras.
   // (https://…) En annan …"), which belongs to the sentence before that, and
@@ -259,11 +262,14 @@ export function provisionText(markdown, uri, anchors) {
   }
   // An EU act has no anchors in its markdown: an article is a "### Artikel 7 – …"
   // heading, a paragraph a "3. " line in it, a recital a "(40) " paragraph. A
-  // point ("6.1.e") goes to the model with its paragraph.
+  // point ("6.1.e") goes to the model with its paragraph. A judgment's
+  // paragraph is a "98. " line of its own.
   if (new URL(uri).pathname.startsWith('/celex/')) {
-    const recital = /^recital-(\d+)$/.exec(fragment);
-    if (recital) {
-      const match = new RegExp(`^\\(${recital[1]}\\) .*$`, 'm').exec(markdown);
+    // a recital "(40) …", or a judgment's paragraph "98. …" (`#point-98`)
+    const unit = /^(?:recital-(\d+)|point-(\d+))$/.exec(fragment);
+    if (unit) {
+      const marker = unit[1] ? `\\(${unit[1]}\\)` : `${unit[2]}\\.`;
+      const match = new RegExp(`^${marker} .*$`, 'm').exec(markdown);
       return match ? { text: match[0].trim(), exact: true } : { text: markdown, exact: false };
     }
     const article = /^(\d+[a-z]?)(?:\.(\d+))?/.exec(fragment);

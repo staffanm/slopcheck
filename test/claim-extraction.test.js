@@ -141,6 +141,11 @@ test('a claim that starts with "Det gäller" includes the sentence before it, un
   const cited = `Förordningen gäller enligt artikel 3 i dataskyddsförordningen även utanför EU. Det gäller även övervakning inom EU. (Jfr prop. 2017/18:105 s. 19.)`;
   const last = claims([{ id: 'text', text: cited }]).at(-1);
   assert.equal(last.assessable, false);
+  // an impersonal "Det är möjligt att …" is its own claim
+  const impersonal = 'Avtalet ska vara skriftligt. Det är möjligt att den personuppgiftsansvarige blir skadeståndsskyldig enligt artikel 82 GDPR.';
+  const own = claims([{ id: 'text', text: impersonal }])[0];
+  assert.equal(own.assessable, true, own.reason);
+  assert.match(own.hypothesis, /^Det är möjligt att/);
   const heading = '3.7.1 Pseudonymisering För att skydda den enskilde kan pseudonymisering användas. Det innebär att uppgifterna inte kan hänföras till den registrerade enligt artikel 4.5 GDPR.';
   assert.equal(claims([{ id: 'text', text: heading }])[0].hypothesis,
     'För att skydda den enskilde kan pseudonymisering användas. Det innebär att uppgifterna inte kan hänföras till den registrerade.');

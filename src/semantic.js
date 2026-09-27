@@ -1,4 +1,4 @@
-import { citationOnly, extractionText, REFERENCE_SENTENCE, REFERS_BACK, sentenceSegments } from './analysis.js';
+import { citationOnly, extractionText, REFERENCE_SENTENCE, refersBack, sentenceSegments } from './analysis.js';
 
 import manifest from './model-manifest.json' with { type: 'json' };
 
@@ -136,7 +136,7 @@ export function semanticClaim(occurrence, context, blocks, occurrences = [occurr
   else if (occurrence.locations.length > 1) reason = 'Påståendet går över flera textblock.';
   else if (/^(Fotnot|Slutnot)/.test(block.label ?? '') && !block.claimContext) reason = 'Noten saknar en säker koppling till påståendet.';
   else if (hypothesis.length > 1600) reason = 'Påståendet är för långt för en säker jämförelse.';
-  else if (REFERS_BACK.test(hypothesis)) reason = 'Påståendet hänvisar till ett sammanhang som inte kunde avgränsas.';
+  else if (refersBack(hypothesis)) reason = 'Påståendet hänvisar till ett sammanhang som inte kunde avgränsas.';
   else if ((hypothesis.match(/\p{L}{2,}/gu)?.length ?? 0) < 3
     || !/(?<!\p{L})(?:är|var|vara|har|hade|ska|skall|kan|får|måste|gäller|gällde|ansvarar|kräver|innebär|utgör|blir|blev|ger|anges|sägs|framgår|står|fann|ansåg|ogillade|biföll|hindrar|fälls|medför|följer|saknar|förutsätter|skulle|bör|borde|döms|dömas|dömde|dömdes|omfattar|omfattas|avser|avses|krävs|finner|anser|bedömer|bedömde|avslog|avslår|bifaller|undanröjde|undanröjer|fastställde|fastställer|ogillar|ogillas|konstaterade|uttalade|tillåter|hindrade|hindrar|påför|påförs|påförde|påfördes|påföra|föreligger|uppkommer|betalas|upphör|förbjuder|räknas|ersätts|tillämpas|prövas|prövade|beviljas|meddelas|träder|finns|fanns|kommer|kom|utgår|utgick|ingår|ingick|bortfaller|åligger|utdöma|utdöms|utdömdes|fastställa|bifalla|ogilla|stadgar|stadgas|föreskriver|föreskrivs)(?!\p{L})/iu.test(hypothesis)
     && !/(?<!\p{L})\p{L}{3,}(?:as|ade|ades)(?!\p{L})/iu.test(hypothesis)) {

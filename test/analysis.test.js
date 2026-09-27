@@ -358,4 +358,7 @@ test('an EU article, paragraph or recital is cut from markdown without anchors',
   assert.equal(cut('7.4.b').text, '4. Vid bedömning av huruvida samtycke är frivilligt ska största hänsyn tas.');
   assert.equal(cut('recital-44').text, '(44) Behandling bör vara laglig när den är nödvändig i samband med avtal.');
   assert.equal(cut('8').exact, false);
+  const judgment = '# C-434/16\n\n37. För det första avspeglar svaren kompetensen.\n\n38. Syftet är att utvärdera examinanden.\n';
+  assert.deepEqual(provisionText(judgment, 'https://lagen.nu/celex/62016CJ0434#point-38'),
+    { text: '38. Syftet är att utvärdera examinanden.', exact: true });
 });
