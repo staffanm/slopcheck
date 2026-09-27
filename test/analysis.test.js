@@ -341,3 +341,21 @@ test('claimSegments tints the claim sentence and marks the citation inside it', 
   assert.ok(outside.length >= 1);
   assert.equal(block.text.slice(segments[0].start, segments[0].end), 'Inledning. ');
 });
+
+test('an EU article, paragraph or recital is cut from markdown without anchors', () => {
+  const markdown = [
+    '# Förordning', '', '(40) För att behandling ska vara laglig bör personuppgifterna behandlas efter samtycke.', '',
+    '(44) Behandling bör vara laglig när den är nödvändig i samband med avtal.', '',
+    '## KAPITEL II', '', '### Artikel 7 – Villkor för samtycke', '',
+    '1. Om behandlingen grundar sig på samtycke ska den personuppgiftsansvarige kunna visa det.', '',
+    '3. De registrerade ska ha rätt att när som helst återkalla sitt samtycke.', '',
+    '4. Vid bedömning av huruvida samtycke är frivilligt ska största hänsyn tas.', '',
+    '### Artikel 70 – Styrelsens uppgifter', '', '1. Styrelsen ska säkerställa en enhetlig tillämpning.',
+  ].join('\n');
+  const cut = fragment => provisionText(markdown, `https://lagen.nu/celex/32016R0679#${fragment}`);
+  assert.deepEqual(cut('7.3'), { text: '3. De registrerade ska ha rätt att när som helst återkalla sitt samtycke.', exact: true });
+  assert.match(cut('7').text, /^### Artikel 7 – [^]*4\. Vid bedömning[^]*tas\.$/);
+  assert.equal(cut('7.4.b').text, '4. Vid bedömning av huruvida samtycke är frivilligt ska största hänsyn tas.');
+  assert.equal(cut('recital-44').text, '(44) Behandling bör vara laglig när den är nödvändig i samband med avtal.');
+  assert.equal(cut('8').exact, false);
+});

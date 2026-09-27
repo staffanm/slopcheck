@@ -257,6 +257,27 @@ export function provisionText(markdown, uri, anchors) {
       return { text: markdown.slice(start, end).trim(), exact: true };
     }
   }
+  // An EU act has no anchors in its markdown: an article is a "### Artikel 7 – …"
+  // heading, a paragraph a "3. " line in it, a recital a "(40) " paragraph. A
+  // point ("6.1.e") goes to the model with its paragraph.
+  if (new URL(uri).pathname.startsWith('/celex/')) {
+    const recital = /^recital-(\d+)$/.exec(fragment);
+    if (recital) {
+      const match = new RegExp(`^\\(${recital[1]}\\) .*$`, 'm').exec(markdown);
+      return match ? { text: match[0].trim(), exact: true } : { text: markdown, exact: false };
+    }
+    const article = /^(\d+[a-z]?)(?:\.(\d+))?/.exec(fragment);
+    const headings = [...markdown.matchAll(/^(#{1,6}) .*$/gm)];
+    const index = article ? headings.findIndex(match => new RegExp(`^#+ Artikel ${article[1]}(?![\\w.])`, 'i').test(match[0])) : -1;
+    if (index < 0) return { text: markdown, exact: false };
+    const end = headings.slice(index + 1).find(match => match[1].length <= headings[index][1].length);
+    const text = markdown.slice(headings[index].index, end?.index ?? markdown.length).trim();
+    if (!article[2]) return { text, exact: true };
+    const numbered = [...text.matchAll(/^(\d+)\. /gm)];
+    const at = numbered.findIndex(match => match[1] === article[2]);
+    if (at < 0) return { text, exact: true };
+    return { text: text.slice(numbered[at].index, numbered[at + 1]?.index ?? text.length).trim(), exact: true };
+  }
   // Markdown exposes Swedish chapters as linked headings and provisions in bold.
   const provision = /^(?:K(\d+[a-z]?))?P(\d+[a-z]?)$/i.exec(fragment);
   if (!provision) return { text: markdown, exact: false };
