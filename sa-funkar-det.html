@@ -23,7 +23,7 @@
         <li><strong>Hitta hänvisningar.</strong> Texten delas upp i hänvisningar (lagrum och rättsfall).</li>
         <li><strong>Kontrollera källorna.</strong> Varje hänvisning slås upp mot lagen.nu. En hänvisning som inte finns markeras som ogiltig.</li>
         <li><strong>Välja källavsnitt.</strong> De mest relevanta styckena i källan väljs ut för jämförelsen.</li>
-        <li><strong>Jämföra påståendet.</strong> En språkmodell bedömer om källavsnittet stöder, motsäger eller inte täcker påståendet.</li>
+        <li><strong>Jämföra påståendet.</strong> En språkmodell bedömer om källavsnittet stöder påståendet, inte täcker det, motsäger det eller bara delvis stöder det (vilseledande).</li>
       </ol>
 
       <h2>Normalläge</h2>
@@ -41,7 +41,7 @@
       <p class="note">Texten som skickas till lagen.nu behandlas tillfälligt i minnet, sparas inte och skickas inte vidare. Påståendet och källavsnitten som skickas till Slopchecks server används endast för att räkna fram bedömningen. De sparas inte.</p>
 
       <h2>Integritetsläge</h2>
-      <p>Kryssa i <strong>Integritetsläge</strong> för att hålla dokumentet och dina hänvisningar på din enhet. Ingen text skickas till lagen.nu eller till Slopchecks server. Jämförelsen körs av en mindre språkmodell i din webbläsare.</p>
+      <p>Kryssa i <strong>Integritetsläge</strong> för att hålla dokumentet och dina hänvisningar på din enhet. Ingen text skickas till lagen.nu eller till Slopchecks server. Jämförelsen körs av en mindre språkmodell i din webbläsare. Den är en nedbantad version av serverns modell och ger samma fyra bedömningar.</p>
       <table class="flow">
         <thead><tr><th>Steg</th><th>Var det körs</th><th>Vad som lämnar din webbläsare</th></tr></thead>
         <tbody>
@@ -63,6 +63,16 @@
         <li><span class="badge sem incorrect">Möjlig motsägelse</span> Källavsnittet kan motsäga påståendet.</li>
         <li><span class="badge sem misleading">Vilseledande</span> Källan ställer villkor eller gör undantag som påståendet utelämnar.</li>
         <li><span class="badge sem abstain">Kunde inte bedömas</span> Jämförelsen ger inget tillräckligt säkert resultat.</li>
+      </ul>
+      <h2>Självsäkerhet</h2>
+      <p>Modellen ger en bedömning bara när den är tillräckligt säker. Gränsen är satt så att bedömningarna ska vara rätt i ungefär 85 procent av fallen i våra testdata. Under gränsen visas <strong>Kunde inte bedömas</strong>.</p>
+      <p>Med reglaget <strong>Självsäkerhet</strong> i rapporten kan du sänka gränsen. Då visas även bedömningar som modellen är mindre säker på. De märks med <em>osäkrare än vanligt</em>. Håll pekaren över en bedömning för att se hur sannolik modellen anser att varje bedömning är.</p>
+      <h2>Källkod och modeller</h2>
+      <p>Slopcheck är öppen källkod. Koden, träningsdata och utvärderingarna finns på <a href="https://github.com/staffanm/slopcheck" target="_blank" rel="noopener noreferrer">github.com/staffanm/slopcheck</a>.</p>
+      <p>Modellerna som används nu kan laddas ner härifrån:</p>
+      <ul>
+        <li><a href="./downloads/server-model/">Servermodellen</a> (ONNX, 8-bitars vikter). Filernas kontrollsummor finns i <code>backend/model-integrity.json</code> i källkoden.</li>
+        <li><a href="./models/%VITE_MODEL_VERSION%/">Webbläsarmodellen</a> (ONNX, 4-bitars vikter). Kontrollsummorna finns i mappens <code>manifest.json</code>.</li>
       </ul>
       <p class="report-limit">Resultaten är experimentella och ersätter inte din egen granskning. Läs <a href="./ansvarsfriskrivning.html">ansvarsfriskrivningen</a>.</p>
       <p><a class="back" href="./">← Tillbaka till kontrollen</a></p>

@@ -9,6 +9,9 @@ services:
     restart: unless-stopped
     ports:
       - "8099:80"
+    volumes:
+      # Offered for download at /downloads/server-model/ (see nginx.conf).
+      - ./models/${SERVER_MODEL}:/usr/share/nginx/server-model:ro
     depends_on:
       - backend
 
@@ -20,9 +23,9 @@ services:
     container_name: slopcheck-backend
     restart: unless-stopped
     environment:
-      - MODEL_DIR=/app/models/classifier-kb-bert-4way-v5
+      - MODEL_DIR=/app/models/${SERVER_MODEL}
       - NUM_THREADS=3
     volumes:
-      - ./models/classifier-kb-bert-4way-v5:/app/models/classifier-kb-bert-4way-v5:ro
+      - ./models/${SERVER_MODEL}:/app/models/${SERVER_MODEL}:ro
     ports:
       - "127.0.0.1:8098:8000"

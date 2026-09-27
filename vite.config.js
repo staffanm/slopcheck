@@ -1,5 +1,9 @@
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
+
+// The pages link to the browser model's download folder as %VITE_MODEL_VERSION%.
+process.env.VITE_MODEL_VERSION = JSON.parse(readFileSync(new URL('./src/model-manifest.json', import.meta.url), 'utf8')).version;
 
 export default defineConfig({
   base: './',
