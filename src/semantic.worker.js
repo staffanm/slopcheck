@@ -3,7 +3,7 @@ import { InferenceSession, Tensor, env } from 'onnxruntime-web/webgpu';
 import wasmUrl from 'onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm?url';
 import wasmModuleUrl from 'onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs?url';
 import manifest from './model-manifest.json';
-import { MODEL_VERSION, scoresFromLogits, semanticResult } from './semantic.js';
+import { fourLabelResult, LABELS, MODEL_VERSION, scoresFromLogits, semanticResult } from './semantic.js';
 import { modelPassages, pairInput, premiseWindow } from './semantic-input.js';
 import { sha256Hex } from './sha256.js';
 
@@ -103,7 +103,7 @@ self.onmessage = async ({ data: { id, base, claim, evidence } }) => {
     // passage at a time. A model trained on merged windows reads one window,
     // the way backend/model.py reads it. See docs/semantic-evaluation.md.
     const premises = manifest.premise === 'window'
-      ? [premiseWindow(selected.passages, tokenizer, claim.hypothesis)].filter(Boolean)
+      ? [premiseWindow(selected.passages, tokenizer, claim.hypothesis, manifest.window_tokens)].filter(Boolean)
       : selected.passages.map(({ text, court, section, role }) => ({ text, court, section, role }));
     const comparisons = [];
     for (const premise of premises) {
@@ -111,7 +111,9 @@ self.onmessage = async ({ data: { id, base, claim, evidence } }) => {
       if (!encoded) { selected.incomplete = true; continue; }
       comparisons.push({ ...premise, scores: await compare(encoded) });
     }
-    self.postMessage({ id, result: { ...semanticResult(comparisons, { ...selected, requireConclusion: evidence.requireConclusion, reason: evidence.reason, exact: evidence.exact }), backend, model: MODEL_VERSION } });
+    const policy = { ...selected, requireConclusion: evidence.requireConclusion, reason: evidence.reason, exact: evidence.exact };
+    const result = LABELS.length === 4 ? fourLabelResult(comparisons, policy) : semanticResult(comparisons, policy);
+    self.postMessage({ id, result: { ...result, backend, model: MODEL_VERSION } });
   } catch (error) {
     // Worker boundary: preserve deterministic results and expose a retryable abstention.
     self.postMessage({ id, error: `Den lokala modellen kunde inte jämföra texten: ${error.message}` });

@@ -39,8 +39,8 @@ export function modelPassages(passages, tokenizer, hypothesis = '') {
 // One premise window, built the way backend/windowing.py builds it. The model
 // reads the selected passages together, so a procedural line cannot contradict
 // a claim that the reasoning and the decision support.
-export function premiseWindow(passages, tokenizer, hypothesis) {
-  const selected = selectWindow(passages, hypothesis, 350, tokenizer);
+export function premiseWindow(passages, tokenizer, hypothesis, budget = 350) {
+  const selected = selectWindow(passages, hypothesis, budget, tokenizer);
   if (!selected.length) return null;
   const shared = key => {
     const values = new Set(selected.map(passage => passage[key]).filter(Boolean));

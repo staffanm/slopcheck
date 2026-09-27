@@ -165,15 +165,20 @@ and [Mammoth](https://github.com/mwilliamson/mammoth.js).
 
 ## Local semantic comparison
 
-The model compares each source passage (premise) with a nearby claim (hypothesis).
-It uses [ScandiNLI small](https://huggingface.co/alexandrainst/scandi-nli-small),
-with 8-bit matrix weights and float32 activations. The model and tokenizer total 24.6 MB.
-The ONNX browser runtime adds about 28.3 MB before HTTP compression.
+The model compares the cited source (premise) with a nearby claim (hypothesis) and gives the
+same four labels as the server: supported, unsupported, incorrect, misleading. It is a student of
+the server model: [KB-BERT](https://huggingface.co/KB/bert-base-swedish-cased) cut to 4 of its 12
+layers and to the vocabulary that legal Swedish uses, distilled from the server's classifier
+(`scripts/distill_kb_bert.py`) and exported with 4-bit weights (`scripts/export_student.py`). The
+model and tokenizer total 25.1 MB. The ONNX browser runtime adds about 28.3 MB before HTTP
+compression. The manifest carries the labels and the calibration; the label policy is the
+server's (`fourLabelResult` in `src/semantic.js`).
 Serve `.wasm` as `application/wasm`; enable gzip or Brotli for static assets.
 A CSP must allow local workers, WASM execution (`wasm-unsafe-eval`), and lagen.nu connections.
 
 The model starts only when a confirmed source has a readable passage and an assessable claim.
-Passages have at most 350 model tokens; claims have at most 150. Neither input is truncated.
+The premise is one window of at most 380 model tokens, as in training; claims have at most 150.
+Neither input is truncated.
 Conflicting evidence, long inputs, ambiguous attribution, and model failures cause abstention.
 Exact quote matches remain separate from semantic support.
 
@@ -182,7 +187,7 @@ For judgments, source selection retains court and section headings. It excludes 
 The headnote of a referat counts as the reporting court's summary. A report without court headings, such as an HFD referat, is read as the reporting court's own text.
 Claims about what a court holds require supporting evidence in its summary or decision before receiving “Stöd hittat”.
 This rule does not resolve every instance of quoted or reported speech.
-A statute provision is compared one stycke or sentence at a time. A whole multi-paragraph provision as one premise scores at chance with the small model.
+The passages are ranked with BM25 and merged into one window, the way the server builds its window.
 The two reported legal examples now reach the model. Both still produce abstention; neither receives a confident error label.
 
 Model files stay cached when the document is cleared. Clear site data to remove those files.

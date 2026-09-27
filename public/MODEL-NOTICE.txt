@@ -1,9 +1,18 @@
-ScandiNLI small — Alexandra Institute
+Privacy mode: kb-bert-student-l4-v6-q4
+Based on KB/bert-base-swedish-cased — Kungliga biblioteket (KB)
+Original: https://huggingface.co/KB/bert-base-swedish-cased
+License: 26 a § upphovsrättslagen (1960:729) är tillämplig
+
+slopcheck fine-tunes the original weights as a four-label claim classifier,
+keeps 4 of its 12 layers and the part of its vocabulary that legal Swedish
+uses, and distils the result from its own larger classifier. The weights are
+exported to ONNX with 4-bit matrix weights and embeddings; activations remain
+float32. KB does not endorse slopcheck or its legal assessment labels.
+
+Earlier privacy-mode models: ScandiNLI small — Alexandra Institute
 Original: https://huggingface.co/alexandrainst/scandi-nli-small
 Revision: 5c7d1eec144f2342823d829693d19cf5230b32a9
 License: Apache License 2.0 (see MODEL-LICENSE.txt)
-
-slopcheck exports the original weights to ONNX and quantizes matrix weights
-and embeddings to symmetric int8. Activations remain float32.
-The quantized version is scandi-nli-small-5c7d1ee-q8-v1.
-The original authors do not endorse slopcheck or its legal assessment labels.
+Exported as scandi-nli-small-5c7d1ee-q8-v1 and fine-tuned as
+scandi-nli-small-legal-v2-q8 (8-bit weights). The original authors do not
+endorse slopcheck or its legal assessment labels.

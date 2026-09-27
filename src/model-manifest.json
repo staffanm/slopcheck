@@ -1,33 +1,44 @@
 {
-  "model": "models/classifier-scandi-nli-small-3way-v2",
-  "revision": "5c7d1eec144f2342823d829693d19cf5230b32a9",
-  "version": "scandi-nli-small-legal-v2-q8",
-  "license": "Apache-2.0",
-  "quantization": "symmetric int8 weights, float32 activations",
+  "model": "models/classifier-kb-bert-4way-student-l4",
+  "version": "kb-bert-student-l4-v6-q4",
+  "license": "26 a § upphovsrättslagen (1960:729) är tillämplig",
+  "quantization": "4-bit weights (MatMulNBits, GatherBlockQuantized, block 128), float32 activations",
   "premise": "window",
+  "window_tokens": 380,
+  "labels": [
+    "supported",
+    "unsupported",
+    "incorrect",
+    "misleading"
+  ],
+  "calibration": {
+    "temperature": 2.1561,
+    "minimum_margin": 0.0,
+    "thresholds": {
+      "supported": 0.6864,
+      "unsupported": 0.8165,
+      "incorrect": 1.01,
+      "misleading": 1.01
+    },
+    "calibration_rows": 543,
+    "policy": "fail-closed, target precision per label as in scripts/calibrate_onnx.py; above 1 disables a label"
+  },
   "files": {
     "model.onnx": {
-      "bytes": 22299101,
-      "sha256": "d0107294cdf8a4d1a09eb18e9b7b3f9b1da7e7593da81f026b92aae39bc6c5f7"
+      "bytes": 24746373,
+      "sha256": "19369e6279620a9a891efb4ae19fc5ab27d4ea5671bf8c24e448f624a82d9131"
     },
     "tokenizer.json": {
-      "bytes": 2301337,
-      "sha256": "c7915bcf7866d950d9eac0e119813c212e4f73d53ad9f754e00fd0eb643ef47f"
+      "bytes": 396290,
+      "sha256": "ecdc94e8ca54c85fd27412346e1c3a6f197a61d3db0448ea8b7bdd09275183f2"
     },
     "tokenizer_config.json": {
-      "bytes": 595,
-      "sha256": "c3ab3bbefad45a44ecd0d688af120f07b699ee689425207143371328049f43dc"
+      "bytes": 571,
+      "sha256": "1f1c0d731519f7c7fdbd3edd1f0d20d57757c5a2047340b3593aed4f7e180e48"
     },
     "config.json": {
-      "bytes": 1100,
-      "sha256": "3aa48140aea9adaa8e33c52c6d263c9db65b76b1652853eefd5fc0824d8429af"
+      "bytes": 961,
+      "sha256": "156bebd13903c6d0664129796cb6ccd08807c17c117d44fab8db2d26b724f916"
     }
-  },
-  "thresholds": {
-    "supported": 1.01,
-    "neutral": 0.8757,
-    "contradiction": 1.01,
-    "calibration_rows": 672,
-    "policy": "fail-closed, targets 0.95/0.90/0.95, Wilson slack 0.05, minimum 30 accepted; 1.01 disables a label"
   }
 }

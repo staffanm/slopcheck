@@ -4,7 +4,7 @@ import { Tokenizer } from '@huggingface/tokenizers';
 import { readFileSync } from 'node:fs';
 import { claimContext, mergeOccurrences } from '../src/analysis.js';
 import { extractLocal } from '../src/lagrum-extract.js';
-import { MODEL_VERSION, semanticClaim, semanticResult, scoresFromLogits, rowSemantic, matchesFilter, judgmentAt, localCandidate, serverCandidate } from '../src/semantic.js';
+import { MODEL_VERSION, semanticClaim, semanticResult, scoresFromLogits, rowSemantic, matchesFilter, judgmentAt, localCandidate, labelCandidate, fourLabelResult } from '../src/semantic.js';
 import { modelPassages, pairInput, premiseWindow } from '../src/semantic-input.js';
 
 // The policy tests pin the provisional thresholds; the shipped manifest may disable labels.
@@ -66,8 +66,9 @@ test('label policy abstains on uncertain, conflicting and incomplete evidence', 
   assert.equal(missingNonExact.status, 'abstain');
   const archaicExact = semanticResult([comparison('10 kap. 9 § handelsbalken', scores(.13, .52, .35))], { thresholds: PROVISIONAL, exact: true });
   assert.equal(archaicExact.status, 'abstain');
-  assert.throws(() => scoresFromLogits([0, NaN, 1]));
-  assert.equal(scoresFromLogits([1000, 0, 0]).entailment, 1);
+  const NLI = ['entailment', 'neutral', 'contradiction'];
+  assert.throws(() => scoresFromLogits([0, NaN, 1], NLI, 1));
+  assert.equal(scoresFromLogits([1000, 0, 0], NLI, 1).entailment, 1);
 });
 
 test('tokenized pairs use premise first and never truncate either input', () => {
@@ -120,12 +121,12 @@ test('multiple targets and semantic filters do not change source validity', () =
 
 test('a lower certainty level forces judgments under the calibrated threshold, for both models', () => {
   const abstain = { status: 'abstain', reason: 'Under tröskeln.' };
-  const server = serverCandidate({ predicted: 'incorrect', abstainReason: 'low_confidence', confidence: 0.6, margin: 0.3, threshold: 0.8, minimumMargin: 0.2 });
+  const server = labelCandidate({ predicted: 'incorrect', abstainReason: 'low_confidence', confidence: 0.6, margin: 0.3, threshold: 0.8, minimumMargin: 0.2 });
   assert.equal(judgmentAt(abstain, server, 1).status, 'abstain');
   assert.equal(judgmentAt(abstain, server, 0.7).status, 'incorrect');
   assert.equal(judgmentAt(abstain, server, 0.7).forced, true);
-  assert.equal(serverCandidate({ predicted: 'unsupported', abstainReason: 'partial_sources' }), null);
-  assert.equal(serverCandidate({ predicted: 'supported', abstainReason: null }), null);
+  assert.equal(labelCandidate({ predicted: 'unsupported', abstainReason: 'partial_sources' }), null);
+  assert.equal(labelCandidate({ predicted: 'supported', abstainReason: null }), null);
 
   const thresholds = { supported: 1.01, neutral: 0.88, contradiction: 1.01, conflict: 0.5 };
   const local = semanticResult([comparison('Ett anbud är bindande.', scores(0.8, 0.15, 0.05))], { thresholds });
@@ -184,4 +185,23 @@ test('"Detta följer även av X" makes the sentence before it the claim, and a c
   const [, provision] = rows(text, [['NIS2', 'https://lagen.nu/celex/32022L2555'], ['1 kap. 2 § 22 p. cybersäkerhetslagen', 'https://lagen.nu/2025:1506#K1P2S1N22p']]);
   assert.equal(provision.claim.assessable, true);
   assert.equal(provision.claim.hypothesis, 'Enligt artikel 6(39), NIS2-direktivet, avses med ”leverantör av utlokaliserade driftstjänster” en entitet som tillhandahåller tjänster som rör installation, förvaltning, drift eller underhåll av IKT-produkter på distans.');
+});
+
+test('four-label weights follow the server policy: temperature, threshold per label, margin', () => {
+  const FOUR = ['supported', 'unsupported', 'incorrect', 'misleading'];
+  const calibration = { temperature: 2, minimum_margin: 0.2, thresholds: { supported: 0.6, unsupported: 0.7, incorrect: 0.8, misleading: 1.01 } };
+  const scores = scoresFromLogits([4, 0, 0, 0], FOUR, 2);
+  assert.ok(Math.abs(scores.supported - Math.exp(2) / (Math.exp(2) + 3)) < 1e-9);
+  const passage = values => [{ text: 'Avtalsvillkor får jämkas.', scores: Object.fromEntries(FOUR.map((label, i) => [label, values[i]])) }];
+  assert.equal(fourLabelResult(passage([0.9, 0.05, 0.03, 0.02]), { calibration }).status, 'correct');
+  const low = fourLabelResult(passage([0.1, 0.1, 0.7, 0.1]), { calibration });
+  assert.equal(low.status, 'abstain');
+  assert.equal(low.candidateInfo.abstainReason, 'low_confidence');
+  // The slider can force it, as a server abstention.
+  assert.equal(judgmentAt(low, labelCandidate(low.candidateInfo), 0.5).status, 'incorrect');
+  assert.equal(fourLabelResult(passage([0.1, 0.1, 0.1, 0.7]), { calibration }).candidateInfo.abstainReason, 'class_disabled');
+  assert.equal(fourLabelResult(passage([0.5, 0.4, 0.05, 0.05]), { calibration: { ...calibration, thresholds: { ...calibration.thresholds, supported: 0.3 } } }).candidateInfo.abstainReason, 'low_margin');
+  // A court's holding needs its summary or decision in the window.
+  assert.equal(fourLabelResult(passage([0.9, 0.05, 0.03, 0.02]), { calibration, requireConclusion: true }).candidateInfo, undefined);
+  assert.equal(fourLabelResult([{ ...passage([0.9, 0.05, 0.03, 0.02])[0], roles: ['decision'] }], { calibration, requireConclusion: true }).status, 'correct');
 });

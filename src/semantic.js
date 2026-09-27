@@ -149,11 +149,40 @@ export function semanticClaim(occurrence, context, blocks, occurrences = [occurr
   return { ...context, hypothesis, authority, requireConclusion: Boolean(courtStatement || inverted), assessable: !reason, reason };
 }
 
-export function scoresFromLogits(logits) {
-  if (logits.length !== 3 || !logits.every(Number.isFinite)) throw new Error('Modellen gav ogiltiga sannolikheter.');
-  const exps = logits.map(value => Math.exp(value - Math.max(...logits)));
+// Three-label NLI weights (entailment, neutral, contradiction), or four-label
+// weights with the server's labels and calibration, as the manifest says.
+export const LABELS = manifest.labels ?? ['entailment', 'neutral', 'contradiction'];
+export const CALIBRATION = manifest.calibration;
+
+export function scoresFromLogits(logits, labels = LABELS, temperature = CALIBRATION?.temperature ?? 1) {
+  if (logits.length !== labels.length || !logits.every(Number.isFinite)) throw new Error('Modellen gav ogiltiga sannolikheter.');
+  const scaled = logits.map(value => value / temperature);
+  const exps = scaled.map(value => Math.exp(value - Math.max(...scaled)));
   const total = exps.reduce((sum, value) => sum + value, 0);
-  return Object.fromEntries(['entailment', 'neutral', 'contradiction'].map((label, index) => [label, exps[index] / total]));
+  return Object.fromEntries(labels.map((label, index) => [label, exps[index] / total]));
+}
+
+// The four-label policy, as backend/model.py applies it: the top label must reach
+// its calibrated threshold (above 1 disables it) and lead the next by the margin.
+// The result carries the same candidate data as a server response, so the
+// certainty slider treats both alike.
+export function fourLabelResult(comparisons, { incomplete = false, requireConclusion = false, reason: empty, calibration = CALIBRATION } = {}) {
+  if (!comparisons.length) return { status: 'abstain', reason: empty ?? 'Inga källavsnitt ryms i modellens textgräns.', comparisons };
+  const evidence = comparisons[0];
+  const ranked = Object.entries(evidence.scores).sort((a, b) => b[1] - a[1]);
+  const [predicted, confidence] = ranked[0];
+  const margin = confidence - ranked[1][1];
+  const threshold = calibration.thresholds[predicted];
+  const abstainReason = threshold > 1 ? 'class_disabled' : confidence < threshold ? 'low_confidence'
+    : margin < calibration.minimum_margin ? 'low_margin' : null;
+  const candidateInfo = { predicted, abstainReason, confidence, margin, threshold, minimumMargin: calibration.minimum_margin };
+  const status = SERVER_STATUS[predicted];
+  if (incomplete) return { status: 'abstain', reason: 'Alla utvalda avsnitt kunde inte jämföras. Texten är för lång.', evidence, comparisons };
+  if (status === 'correct' && requireConclusion && !(evidence.roles ?? [evidence.role]).some(role => ['summary', 'decision'].includes(role))) {
+    return { status: 'abstain', reason: 'Modellen hittar liknande text, men kan inte bekräfta påståendet i domstolens sammanfattning eller avgörande.', evidence, comparisons };
+  }
+  if (abstainReason) return { status: 'abstain', reason: SEMANTIC.abstain[1], evidence, comparisons, candidateInfo };
+  return { status, reason: SEMANTIC[status][1], evidence, comparisons, candidateInfo };
 }
 
 export function semanticResult(comparisons, { incomplete = false, requireConclusion = false, reason: empty, exact = false, thresholds = THRESHOLDS } = {}) {
@@ -188,19 +217,20 @@ export function semanticResult(comparisons, { incomplete = false, requireConclus
   return { status, reason: status === 'abstain' ? reason : SEMANTIC[status][1], evidence, comparisons };
 }
 
-// The "Självsäkerhet" slider. Both models give a calibrated judgment and, when
+// The "Självsäkerhet" slider. Every model gives a calibrated judgment and, when
 // that judgment abstained only because the top label fell under its
 // threshold, a candidate: the top label with its score and threshold. Other
 // abstentions (conflicting passages, partial sources, text too long) have no
-// candidate and stay.
+// candidate and stay. labelCandidate reads a four-label result (the server's
+// response or fourLabelResult); localCandidate a three-label one.
 const SERVER_STATUS = { supported: 'correct', unsupported: 'missing', incorrect: 'incorrect', misleading: 'misleading' };
 const LOCAL_STATUS = { entailment: 'correct', neutral: 'missing', contradiction: 'incorrect' };
 const LOCAL_THRESHOLD = { entailment: 'supported', neutral: 'neutral', contradiction: 'contradiction' };
 
-export function serverCandidate(server) {
-  if (!['low_confidence', 'low_margin', 'class_disabled'].includes(server.abstainReason) || !SERVER_STATUS[server.predicted]) return null;
-  return { status: SERVER_STATUS[server.predicted], confidence: server.confidence, threshold: server.threshold,
-    margin: server.margin, minimumMargin: server.minimumMargin };
+export function labelCandidate(info) {
+  if (!['low_confidence', 'low_margin', 'class_disabled'].includes(info.abstainReason) || !SERVER_STATUS[info.predicted]) return null;
+  return { status: SERVER_STATUS[info.predicted], confidence: info.confidence, threshold: info.threshold,
+    margin: info.margin, minimumMargin: info.minimumMargin };
 }
 
 export function localCandidate(result, thresholds = THRESHOLDS) {
@@ -219,7 +249,7 @@ export function judgmentAt(calibrated, candidate, level) {
   if (candidate.confidence < level * Math.min(candidate.threshold, 1) || (candidate.margin ?? 1) < level * (candidate.minimumMargin ?? 0)) return kept;
   return {
     status: candidate.status,
-    reason: `${SEMANTIC[candidate.status][1]} Modellen är ${Math.round(candidate.confidence * 100)} % säker, under den kalibrerade nivån.`,
+    reason: `${SEMANTIC[candidate.status][1]} Modellen är ${Math.round(candidate.confidence * 100)} % säker, vilket är osäkrare än vanligt.`,
     evidence: candidate.evidence ?? calibrated.evidence,
     forced: true,
   };

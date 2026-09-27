@@ -1,7 +1,7 @@
 import './style.css';
 import { extract, getDocumentSource, pool, prefetchCorePack, request, resolveTarget, resolveTargetPrivate, stopExtractionWorker } from './api.js';
 import { claimContext, claimSegments, invalidCitationMessage, mergeOccurrences, occurrenceStatus, validateBlocks } from './analysis.js';
-import { matchesFilter, rowSemantic, SEMANTIC, judgmentAt, localCandidate, semanticClaim, serverCandidate } from './semantic.js';
+import { matchesFilter, rowSemantic, SEMANTIC, judgmentAt, localCandidate, semanticClaim, labelCandidate } from './semantic.js';
 import { semanticClient } from './semantic-client.js';
 import { matchClaimRemote } from './api.js';
 
@@ -299,7 +299,7 @@ function renderSource(group, multiple, row) {
   const result = row.semantic.get(target.uri);
   if (result) {
     const review = element('div', `semantic-result ${result.status}${result.status === 'correct' ? ' supported' : ''}${result.status === 'incorrect' ? ' contradiction' : ''}`);
-    const heading = element('strong', '', `${SEMANTIC[result.status][0]}${result.forced ? ' · under säkerhetsnivån' : ''}`);
+    const heading = element('strong', '', `${SEMANTIC[result.status][0]}${result.forced ? ' · osäkrare än vanligt' : ''}`);
     heading.title = scoreText(result);
     review.append(heading);
     if (result.status !== 'pending') {
@@ -610,7 +610,8 @@ async function assessClaim(claim, items, isLocal, signal) {
     const pooled = ordered.flatMap(({ citation, passages }) => passages.map(passage => ({ ...passage, section: passage.section ?? (items.length > 1 ? citation : undefined) })))
       .map((passage, index) => ({ ...passage, index }));
     const result = await semantics.assess(claim, { ...items[0].evidence, passages: pooled }, signal);
-    return withCertainty({ ...result, calibrated: { status: result.status, reason: result.reason, evidence: result.evidence }, candidate: localCandidate(result) });
+    const candidate = result.candidateInfo ? labelCandidate(result.candidateInfo) : localCandidate(result);
+    return withCertainty({ ...result, calibrated: { status: result.status, reason: result.reason, evidence: result.evidence }, candidate });
   }
   const sources = ordered.map(({ citation, passages }) => ({ text: passages.map(passage => passage.text).join('\n\n'), citation }));
   const response = await matchClaimRemote(claim.hypothesis, sources, { signal });
@@ -618,7 +619,7 @@ async function assessClaim(claim, items, isLocal, signal) {
   const evidence = response.evidence ? { text: response.evidence.source ?? response.evidence, scores: first?.scores } : undefined;
   return withCertainty({
     calibrated: { status: response.status, reason: response.reason, evidence },
-    candidate: serverCandidate({ predicted: first?.predicted_class, abstainReason: first?.abstain_reason, confidence: first?.confidence,
+    candidate: labelCandidate({ predicted: first?.predicted_class, abstainReason: first?.abstain_reason, confidence: first?.confidence,
       margin: first?.margin, threshold: first?.threshold ?? 1, minimumMargin: first?.minimum_margin ?? 0 }),
     comparisons: (response.comparisons ?? []).map(item => ({ text: item.source, scores: item.scores })),
     backend: 'Server',
