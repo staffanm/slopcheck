@@ -199,7 +199,7 @@ footer p, footer > a:last-child { font-size: 11px; color: var(--muted); }
   --st-unconfirmed-ink: #715018; --st-unconfirmed-line: #d0bd8c; --st-unconfirmed-bg: #f4ecd6; --st-unconfirmed-tint: #f9efce;
   --st-error-ink: #715018; --st-error-line: #d0bd8c; --st-error-bg: #f4ecd6; --st-error-tint: #f9efce;
   --st-nonsensical-ink: #55605a; --st-nonsensical-line: #b7bfb2; --st-nonsensical-bg: #eceee7; --st-nonsensical-tint: #eef0ea;
-  --st-abstain-ink: #5b625a; --st-abstain-line: #c2c8bb; --st-abstain-bg: #eef0e9; --st-abstain-tint: #f0f1ec;
+  --st-abstain-ink: #5b625a; --st-abstain-line: #c2c8bb; --st-abstain-bg: #eef0e9; --st-abstain-tint: #e9ebe5;
   --st-pending-ink: #5b625a; --st-pending-line: #c2c8bb; --st-pending-bg: #eef0e9; --st-pending-tint: #eef0ea;
 }
 
@@ -236,18 +236,27 @@ footer p, footer > a:last-child { font-size: 11px; color: var(--muted); }
 
 /* ---- Document marks: claim tint + citation border ---- */
 .claim-mark { display: inline; border-radius: 2px; box-decoration-break: clone; -webkit-box-decoration-break: clone; padding: 1px 0; cursor: pointer; scroll-margin: 120px; }
-.claim-mark.tint-correct, .claim-mark.tint-supported { background: var(--st-correct-tint); }
-.claim-mark.tint-incorrect, .claim-mark.tint-contradiction { background: var(--st-incorrect-tint); }
-.claim-mark.tint-missing { background: var(--st-missing-tint); }
-.claim-mark.tint-misleading { background: var(--st-misleading-tint); }
-.claim-mark.tint-nonsensical { background: var(--st-nonsensical-tint); }
-.claim-mark.tint-abstain, .claim-mark.tint-pending { background: transparent; }
+.claim-mark { background: var(--mark, transparent); }
+.claim-mark.tint-correct, .claim-mark.tint-supported { --mark: var(--st-correct-tint); --mark-strong: var(--st-correct-line); }
+.claim-mark.tint-incorrect, .claim-mark.tint-contradiction { --mark: var(--st-incorrect-tint); --mark-strong: var(--st-incorrect-line); }
+.claim-mark.tint-missing { --mark: var(--st-missing-tint); --mark-strong: var(--st-missing-line); }
+.claim-mark.tint-misleading { --mark: var(--st-misleading-tint); --mark-strong: var(--st-misleading-line); }
+.claim-mark.tint-nonsensical { --mark: var(--st-nonsensical-tint); --mark-strong: var(--st-nonsensical-line); }
+/* An unassessed claim stays visible in a neutral gray; one still being checked does not. */
+.claim-mark.tint-abstain { --mark: var(--st-abstain-tint); --mark-strong: var(--st-abstain-line); }
+.claim-mark.tint-pending { --mark: transparent; --mark-strong: var(--st-pending-line); }
 .citation-mark { border-bottom: 2px solid var(--st-abstain-line); }
 .citation-mark.found { border-bottom-color: var(--st-found-line); }
 .citation-mark.unconfirmed, .citation-mark.error { border-bottom-color: var(--st-error-line); }
 .citation-mark.pending { border-bottom-color: var(--st-pending-line); }
 .citation-mark.invalid { border-bottom: 0; text-decoration: underline wavy var(--st-invalid-line); text-underline-offset: 4px; }
-.claim-mark.selected, .citation-mark.selected { outline: 2px solid #344f64; outline-offset: 1px; border-radius: 2px; }
+/* The active mark is the same color, stronger: no outline. */
+.citation-mark { --mark-strong: var(--st-abstain-line); }
+.citation-mark.found { --mark-strong: var(--st-found-line); }
+.citation-mark.unconfirmed, .citation-mark.error { --mark-strong: var(--st-error-line); }
+.citation-mark.invalid { --mark-strong: var(--st-invalid-line); }
+.claim-mark.selected { background: color-mix(in srgb, var(--mark-strong) 70%, var(--mark, transparent)); }
+.citation-mark.selected { background: color-mix(in srgb, var(--mark-strong) 55%, transparent); }
 
 .legend { font-size: 11px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0; padding: 0 24px 17px; border-bottom: 1px solid var(--line); align-items: center; }
 .legend-swatch { display: inline-flex; align-items: center; gap: 6px; }
@@ -258,6 +267,7 @@ footer p, footer > a:last-child { font-size: 11px; color: var(--muted); }
 .legend-swatch.missing::before { background: var(--st-missing-tint); border-color: var(--st-missing-line); }
 .legend-swatch.incorrect::before { background: var(--st-incorrect-tint); border-color: var(--st-incorrect-line); }
 .legend-swatch.misleading::before { background: var(--st-misleading-tint); border-color: var(--st-misleading-line); }
+.legend-swatch.abstain::before { background: var(--st-abstain-tint); border-color: var(--st-abstain-line); }
 
 /* ---- Progress bar ---- */
 .progress { display: block; position: sticky; top: 0; z-index: 3; background: #f7f7f0; padding: 10px 0 12px; border-bottom: 1px solid var(--line); }

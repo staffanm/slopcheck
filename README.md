@@ -1,8 +1,22 @@
 # slopcheck
 
-A static JavaScript app for Phases 1 and 2 of
+Slopcheck checks the legal citations in a text: that each cited provision, case
+or förarbete exists, and whether the cited source supports the claim made
+beside it. It is a static JavaScript app with a small backend for the server
+model, live at [slopcheck.tomtebo.org](https://slopcheck.tomtebo.org). It
+started from Phases 1 and 2 of
 [`PRD-juridisk-hanvisningskontroll.md`](../ferenda/PRD-juridisk-hanvisningskontroll.md).
-The service name is **slopcheck**.
+
+It has two modes:
+
+- **Normal mode.** lagen.nu extracts and resolves the citations
+  (`/api/v1/citations/extract`, `/api/v1/resolve`) and serves the source text.
+  The backend compares each claim with its source using a fine-tuned KBLab
+  Megatron-BERT-large.
+- **Integritetsläge (privacy mode).** The text stays in the browser. Citations are
+  extracted by the JavaScript port of lagen.nu's `LagrumParser`, and a 25 MB
+  student of the server model compares the claims in the browser. See
+  [What leaves the browser](#what-leaves-the-browser).
 
 ## Run
 
@@ -16,7 +30,9 @@ npm run dev
 ```
 
 Open the URL printed by Vite. The app calls `https://lagen.nu/api/v1` directly.
-It needs no local Ferenda process, credentials, or application backend.
+Normal mode also calls `/api/match`, which the dev server proxies to the deployed
+backend; set `SLOPCHECK_BACKEND` to use another one. Privacy mode needs no backend.
+No local Ferenda process or credentials are needed.
 
 ## Build and host
 
@@ -46,8 +62,9 @@ ssh ludo.tomtebo.org "cd repos/slopcheck && git pull && docker compose up -d --b
 ```
 
 Model files are not in git. Copy a new server model directory to ludo with rsync.
-The backend serves the model that `MODEL_DIR` in `docker-compose.yml` names, and
-only when its files match `backend/model-integrity.json`. Record a model there
+The backend serves the model that `SERVER_MODEL` in `.env` names
+(`models/<SERVER_MODEL>/`), and only when its files match
+`backend/model-integrity.json`. Record a model there
 after you train or calibrate it: `python -m backend.integrity models/<name>`. The
 browser model has the same check: `npm run build` compares `public/models/<version>/`
 with the hashes in `src/model-manifest.json`.
@@ -64,17 +81,26 @@ Permit connections to `https://lagen.nu` in the host's Content Security Policy.
 The app uses workers served from its own origin.
 PDF.js can also require `blob:` worker URLs.
 
-Original files remain in the browser. In default mode, the extraction request sends text to lagen.nu.
-In local privacy mode, the browser extracts citations with the JavaScript `LagrumParser`.
-The running text does not leave the browser in local mode.
-Only identified citations are sent to `GET /api/v1/resolve?q=${uri}` to verify their validity.
-The app states this transfer before the check button.
-It stores only the local mode preference in `localStorage`.
-No documents are stored in `localStorage`, `IndexedDB`, caches, or a service worker.
-Model assets use a versioned Cache Storage cache. Documents and inference results never enter that cache.
-Model and runtime downloads come from the SPA host. No remote inference service is used.
-No analytics, remote fonts, or runtime CDN dependencies are used.
-Reloading or clearing the document removes the session's report.
+### What leaves the browser
+
+Original files remain in the browser in both modes.
+
+- **Normal mode** sends the document's text to lagen.nu for extraction, the cited
+  uris to `/resolve` and `/document`, and each claim with its source passages to
+  the slopcheck backend (`/api/match`). The backend keeps no log of request bodies.
+- **Privacy mode** sends no text and no claim. The browser extracts the citations
+  and runs the comparison. For existence it asks `GET /api/v1/range/{prefix}`
+  with the first 3 hex characters of the document uri's hash, plus 2 random
+  decoy prefixes. The text comes from static packs (`GET /api/v1/packs/{id}`, a
+  segment such as `sfs/1990s` or `celex/3/2016`). The server still learns which
+  bucket and which pack. A document that is not in its pack is fetched from
+  `/document` directly, which names it.
+
+The app stores only the mode preference in `localStorage`. No documents are
+stored in `localStorage`, `IndexedDB`, caches, or a service worker. Model assets
+and packs use versioned Cache Storage caches; documents and inference results
+never enter them. No analytics, remote fonts, or runtime CDN dependencies are
+used. Reloading or clearing the document removes the session's report.
 
 ## Features
 
@@ -87,8 +113,14 @@ Reloading or clearing the document removes the session's report.
 - Separate found, invalid, unconfirmed, pending, and request-failure states.
 - Exact provision selection for supported Swedish Markdown layouts.
 - Local passage ranking and normalized quote matching in a Web Worker.
-- Experimental local semantic comparison with separate source and claim statuses.
-- Claim rules, tokenizer limits, conservative thresholds, and abstention.
+- Four claim labels: stöd hittat, stöd saknas, motsägelse, vilseledande, and abstention
+  ("Kunde inte bedömas") when the model is below its calibrated threshold.
+- A certainty slider ("Självsäkerhet"): at 100 % the calibrated result, below it also
+  the model's less certain labels, marked "osäkrare än vanligt". The probabilities show on hover.
+- Claim context: a claim that starts by referring back ("Det gäller …", "Detta innebär …")
+  includes the sentence before; PDF footnotes are inlined beside their sentence.
+- Exact source units: a Swedish provision, an EU article, paragraph or recital, a
+  judgment paragraph (`#point-N`), or a förarbete page.
 - WebGPU when available, with local WASM recovery if GPU execution fails.
 - Cancellation, retry of failed sources or local inference, filters, and printing all report entries.
 - Swedish interface, keyboard controls, visible focus, and mobile layout.
@@ -120,6 +152,7 @@ resolver, preserving the API's document context.
 - Context extraction uses sentence boundaries. Ambiguous claims still need manual review.
 - A quoted phrase match proves matching words only. It does not establish support for the entire claim.
 - Source selection can use the whole document when the exact provision is unavailable.
+  lagen.nu has no anchors for Swedish court decisions, so a pinpoint into one is read whole.
 - Sources use the API's presented version. They do not automatically select historical wording.
 - No citations found does not prove that a document contains no citations.
 
@@ -149,6 +182,8 @@ See [the deployed API test report](docs/api-test-drive.md) for the judgment chec
 | `index.html`, `src/style.css` | Swedish interface and print layout |
 | `src/main.js` | Session state, file selection, progress, and report rendering |
 | `src/api.js` | Extraction, resolution, source requests, and request concurrency |
+| `src/privacy-api.js`, `src/ohttp.js` | Privacy mode: range buckets, decoys, packs, and the (disabled) OHTTP client |
+| `src/polyfills.js` | `ReadableStream` async iteration for older Safari |
 | `src/analysis.js` | Text normalization and offset mapping, inline spans, claim context, source selection, quote matching, and PDF line assembly |
 | `src/lagrum-extract.js` | Browser-side citation extraction coordinator, span filtering, and block location mapping |
 | `src/lagrum/` | JavaScript port of `LagrumParser`, Lark-compatible Earley parser, compiled EBNF grammars, and datasets |
@@ -158,6 +193,8 @@ See [the deployed API test report](docs/api-test-drive.md) for the judgment chec
 | `src/semantic-client.js`, `src/semantic.worker.js` | Cancellation, model asset cache, and local inference |
 | `src/model-manifest.json` | Pinned model revision and evaluated asset hashes |
 | `scripts/export-model.py`, `scripts/check-model.js` | Reproducible export and build validation |
+| `backend/` | The server model: FastAPI `/api/match`, windowing, calibration, model integrity check |
+| `scripts/train_kb_bert.py`, `scripts/distill_kb_bert.py`, `scripts/export_student.py`, `scripts/calibrate_onnx.py` | Training, distillation, 4-bit export, and calibration |
 
 Document parsing uses [PDF.js](https://mozilla.github.io/pdf.js/examples/)
 and [Mammoth](https://github.com/mwilliamson/mammoth.js).
@@ -194,44 +231,27 @@ Model files stay cached when the document is cleared. Clear site data to remove 
 Changing the model requires an export version change, new hashes, and a fresh evaluation.
 See [the evaluation and release limits](docs/semantic-evaluation.md).
 
-## Plan: a more capable model server-side
+## Server comparison
 
-The local model is too small for the job. On the 70-claim corpus fixture it labels 9 claims and
-abstains on 55. It cannot tell “fem år” from “tio år” with confidence, and it reads an
-exception stycke as a contradiction of the main rule. See
-[the evaluation](docs/semantic-evaluation.md). A larger NLI model fixes part of this.
-A larger model does not fit the browser: mDeBERTa-v3-base XNLI is about 280 MB quantized,
-ten times the current download.
+Normal mode compares claims on the server with
+[KBLab Megatron-BERT-large](https://huggingface.co/KBLab/megatron-bert-large-swedish-cased-165-zero-shot),
+fine-tuned as a four-label claim classifier (supported, unsupported, incorrect,
+misleading) and exported to ONNX with int8 weights, 354 MB. The backend windows a
+long source into premises of the length the model was trained on, and one
+judgment covers every cited source of a row.
 
-The plan is a slopcheck-specific inference service, not a lagen.nu API:
+Each label has its own threshold, calibrated for a target precision of 0.85; a
+label that cannot reach it is never given. Measured with the deployed int8 model:
 
-1. **Model.** [mDeBERTa-v3-base-xnli-multilingual-nli-2mil7](https://huggingface.co/MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7),
-   exported to ONNX with int8 weights the same way `scripts/export-model.py` exports the small model.
-   About 86M encoder parameters and a 190M-parameter embedding table; about 600 MB resident in int8.
-   Evaluate it on `test/fixtures/legal-claims.jsonl` before anything else. If it does not beat the
-   small model on that fixture, stop here.
-2. **Service.** One container on ludo.tomtebo.org beside the static site, `slopcheck-nli`, running
-   ONNX Runtime on CPU. One endpoint, `POST /nli`, that takes a list of premise/hypothesis pairs and
-   returns the three scores per pair. No document text, no citation, no session: the browser still
-   extracts the claim and selects the passages, and sends only those pairs. The service keeps no log
-   of request bodies. The host nginx proxies `slopcheck.tomtebo.org/nli` to it, same certificate.
-3. **Cost.** Ludo has 3 virtual Broadwell cores with AVX2 and FMA, 7 GB of RAM, and 124 GB free disk,
-   shared with the paragraf and paratext containers. A 512-token pair costs roughly 0.4 to 0.8 seconds
-   quantized on one core; the passages the browser now selects are mostly under 128 tokens, which is
-   four to eight times cheaper. A ten-citation document with five passages each is 50 pairs, so
-   expect 5 to 30 seconds per check. Run one worker with a request queue and a 60-second timeout.
-   Measure before deciding whether that is acceptable; the numbers above are estimates, not benchmarks.
-4. **Client.** A third mode beside default and local privacy mode: “server comparison”. The mode
-   selector states what leaves the browser. In local privacy mode the small model stays the only option.
-   The label policy, thresholds and the label rule in the tests apply unchanged to the server scores;
-   thresholds are recalibrated on the fixture for the new model, and the recorded results in `docs/`
-   are regenerated per model.
-5. **Deterministic checks first.** A number check does not need a model: extract quantities with a
-   unit (år, veckor, månader, dagar, procentenheter, kr) from the claim and the provision, and report a
-   differing number as its own finding. Eight of the 25 incorrect fixture claims are wrong numbers.
-   This ships before the service, in the browser, and applies to both models.
+| Test set | Answered | Right among the answered |
+|---|---|---|
+| Test partition | 607 of 860 | 0.852 |
+| Hand-written claims (`test/fixtures/legal-claims.jsonl`) | 37 of 55 | 33 (0.89) |
 
-Not in the plan: exposing the service under lagen.nu, GPU hosting, or a generative model as judge.
+"Misleading" does not pass calibration and "incorrect" reaches 0.78, so a wrong
+claim is more often left unassessed than labelled. Both models can be downloaded:
+the server model at `/downloads/server-model/`, the browser model at `/models/`.
+The KB models' license is 26 a § upphovsrättslagen (1960:729).
 
 ## Dataset Viewer & Review UI
 

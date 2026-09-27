@@ -774,7 +774,6 @@ $('#check').addEventListener('click', async () => {
     $('#report-heading').focus({ preventScroll: true });
     $('#report').scrollIntoView({ block: 'start' });
     await checkTargets([...targets.values()], signal);
-    if (selectedRow === null && rows.length) selectRow(Math.max(0, rows.findIndex((_, index) => rowStatus(index) === 'invalid')));
     await compareClaims(signal);
   } catch (error) {
     if (error.name !== 'AbortError') displayError(error);
