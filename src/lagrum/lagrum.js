@@ -262,6 +262,13 @@ export function buildTrigger(types, lang = 'swe') {
   return new RegExp(parts.join('|'), 'g');
 }
 
+// A known EU act named on its own, also in the genitive. Group 1 is the name.
+export function actMentionPattern(eu_acts) {
+  if (eu_acts.length === 0) return null;
+  const names = eu_acts.map(escapeRegex).join('|');
+  return new RegExp(`(?<![\\wåäöÅÄÖ-])(${names})(?::s|s)?(?![\\wåäöÅÄÖ-])`, 'gi');
+}
+
 export function with_indefinite_aliases(named_acts) {
   const out = { ...named_acts };
   for (const [alias, celex] of Object.entries(named_acts)) {
@@ -591,6 +598,8 @@ export class LagrumParser {
 
     this.lark = this._buildLark(requested, this.parse_types, abbrevs, eu_acts, lang);
     this.trigger = buildTrigger(this.parse_types, lang);
+    this.act_mention = this.parse_types.has(EULAGSTIFTNING) && lang === 'swe'
+      ? actMentionPattern(eu_acts) : null;
     this.emd = requested.has(EMDRATTSFALL);
     this.case_numbers = requested.has(MALNUMMER);
     this.eng = requested.has(ENGLAGRUM);
@@ -679,8 +688,10 @@ export class LagrumParser {
 
     this.trigger.lastIndex = 0;
     let m;
+    let pos = 0;
     while ((m = this.trigger.exec(text)) !== null) {
       const start = m.index;
+      this._remember_act_mentions(text, pos, start);
       const [tree, length] = this.try_parse(text, start);
       if (tree !== null && this.acceptable(tree, text, start, start + length)) {
         const base = start;
@@ -716,7 +727,9 @@ export class LagrumParser {
       } else {
         this.trigger.lastIndex = start + 1;
       }
+      pos = this.trigger.lastIndex;
     }
+    this._remember_act_mentions(text, pos, text.length);
 
     let result = refs;
     if (this.eng) {
@@ -1124,6 +1137,23 @@ export class LagrumParser {
     return uri + (frag ? '#' + frag : '');
   }
 
+  // The last EU act named without an article in text[start:end] takes the focus,
+  // as in ferenda: "den allmänna dataskyddsförordningen ... artikel 1" is the GDPR.
+  _remember_act_mentions(text, start, end) {
+    if (this.act_mention === null) return;
+    const window = text.slice(start, end);
+    let celex = null;
+    this.act_mention.lastIndex = 0;
+    let m;
+    while ((m = this.act_mention.exec(window)) !== null) {
+      // a short alias is an acronym ("GDPR") only when not in lower case
+      if (m[1].length > 5 || m[1] !== m[1].toLowerCase()) {
+        celex = this.named_acts[m[1].toLowerCase()];
+      }
+    }
+    if (celex) this.state.remember_eu_act(celex);
+  }
+
   _article_specs(node) {
     const items = [];
     for (const s of node.iter_subtrees_topdown()) {
@@ -1133,8 +1163,10 @@ export class LagrumParser {
     const out = [];
     for (const it of items) {
       const d = findRefids(it);
+      // a genitive name first ("EU-stadgans artikel 8") belongs to the span
+      const genitive = treeTokens(node).some(t => t.type === 'GENITIVE');
       const span = items.length === 1
-        ? [nodeSpan(subtree(node, 'artikel_part'))[0], nodeSpan(node)[1]]
+        ? [nodeSpan(genitive ? node : subtree(node, 'artikel_part'))[0], nodeSpan(node)[1]]
         : nodeSpan(it);
       const letters = [];
       for (const s of it.iter_subtrees_topdown()) {
@@ -1337,11 +1369,24 @@ export class LagrumParser {
   emit_pages(node, base, out, doc_start) {
     const pages = [];
     for (const s of node.iter_subtrees_topdown()) {
-      if (s.data === 'sida_num') pages.push(s);
+      if (s.data === 'sida_num' || s.data === 'foljande') pages.push(s);
     }
+    let previous = null;
     for (let i = 0; i < pages.length; i++) {
       const page = pages[i];
       const [pstart, pend] = nodeSpan(page);
+      if (page.data === 'foljande') {
+        // "s. 184 f." also cites page 185; "ff." cites at least 185 and 186.
+        // Links may not overlap, so each "f" links one page.
+        if (previous !== null) {
+          for (let k = 0; k < pend - pstart - 1; k++) {
+            const end = k === pend - pstart - 2 ? pend : pstart + k + 1;
+            out.push({ _uri: `${base}#sid${previous + k + 1}`, _span: [pstart + k, end] });
+          }
+        }
+        continue;
+      }
+      previous = Number(tokenText(page));
       const span = [i === 0 ? doc_start : pstart, pend];
       out.push({ _uri: `${base}#sid${tokenText(page)}`, _span: span });
     }

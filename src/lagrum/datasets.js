@@ -1461,6 +1461,7 @@ export const NAMEDACTS_DATA = {
 export const TREATIES_DATA = {
   "euf-fördraget": "celex/12016E/TXT",
   "feuf": "celex/12016E/TXT",
+  "funktionsfördraget": "celex/12016E/TXT",
   "fördraget om europeiska unionens funktionssätt": "celex/12016E/TXT",
   "eu-fördraget": "celex/12016M/TXT",
   "fördraget om europeiska unionen": "celex/12016M/TXT",
@@ -8496,6 +8497,7 @@ export const CITATION_NAMES = [
   "flexiboys fakturor",
   "fosterdotterns arv",
   "fritidshuset i eda",
+  "funktionsfördraget",
   "företagsnamnslagen",
   "förseningsavgiften",
   "förvärvstidpunkten",

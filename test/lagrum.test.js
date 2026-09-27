@@ -197,6 +197,28 @@ describe('Lagrum Unit Tests', () => {
     ]);
   });
 
+  it('a page without the space and "f."/"ff." cite the following pages, as in ferenda', () => {
+    const parser = new LagrumParser({}, { basefile: 'x', parse_types: [FORARBETEN] });
+    const refs = parser.parse_text('(SOU 2016:7 s.184 f.) och prop. 2017/18:105 s. 40 ff. och 52');
+    assert.deepEqual(refs.map(r => [r.text, r.uri]), [
+      ['SOU 2016:7 s.184', 'https://lagen.nu/sou/2016:7#sid184'],
+      ['f.', 'https://lagen.nu/sou/2016:7#sid185'],
+      ['prop. 2017/18:105 s. 40', 'https://lagen.nu/prop/2017/18:105#sid40'],
+      ['f', 'https://lagen.nu/prop/2017/18:105#sid41'],
+      ['f.', 'https://lagen.nu/prop/2017/18:105#sid42'],
+      ['52', 'https://lagen.nu/prop/2017/18:105#sid52'],
+    ]);
+  });
+
+  it('"Ds." with a period is a departementsserien citation, as in ferenda', () => {
+    const parser = new LagrumParser({}, { basefile: 'x', parse_types: [FORARBETEN] });
+    const refs = parser.parse_text('(Ds. 1998:14 s. 19 f.)');
+    assert.deepEqual(refs.map(r => [r.text, r.uri]), [
+      ['Ds. 1998:14 s. 19', 'https://lagen.nu/ds/1998:14#sid19'],
+      ['f.', 'https://lagen.nu/ds/1998:14#sid20'],
+    ]);
+  });
+
   it('anonymous law ref is one pinpointed link', () => {
     const parser = new LagrumParser(NAMEDLAWS_DATA, { basefile: '9999:999', parse_types: [LAGRUM] });
     const refs = parser.parse_text(
@@ -376,6 +398,28 @@ describe('Lagrum Unit Tests', () => {
       uris('artikel 2 i bilagan till kommissionens rekommendation 2003/361/EG'),
       ['https://lagen.nu/celex/32003H0361']
     );
+  });
+
+  it('a bare act name puts the act in focus, and a genitive name owns its article, as in ferenda', () => {
+    const GDPR = 'https://lagen.nu/celex/32016R0679';
+    const parser = new LagrumParser(NAMEDLAWS_DATA, {
+      basefile: 'dom',
+      parse_types: [EULAGSTIFTNING],
+      named_acts: NAMEDACTS_DATA,
+    });
+    parser.reset();
+    const links = text => parser.parse_text(text, {}).map(r => [r.text, r.uri]);
+    links('förordning (EU) 2016/679 om upphävande av direktiv 95/46/EG');
+    assert.deepEqual(links('den allmänna dataskyddsförordningen, även mest känt som GDPR. '
+      + 'Syftet är betonat i artikel 1 samt under'), [['artikel 1', `${GDPR}#1`]]);
+    assert.deepEqual(links('en hänvisning till EU-stadgans artikel 8.1 och Funktionsfördragets artikel 16.1 som'), [
+      ['EU-stadgans artikel 8.1', 'https://lagen.nu/celex/12012P/TXT#8.1'],
+      ['Funktionsfördragets artikel 16.1', 'https://lagen.nu/celex/12016E/TXT#16.1'],
+    ]);
+    assert.deepEqual(links('enligt GDPR:s artikel 17'), [['GDPR:s artikel 17', `${GDPR}#17`]]);
+    links('enligt direktiv 95/46/EG gällde');
+    assert.deepEqual(links('dora sa att artikel 2 gällde'),
+      [['artikel 2', 'https://lagen.nu/celex/31995L0046#2']]);
   });
 
   it('eu namedact articles and anaphora', () => {

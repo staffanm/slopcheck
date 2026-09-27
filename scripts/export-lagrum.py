@@ -48,7 +48,8 @@ from ferenda.lib.lagrum import (
     load_namedlaws,
 )
 
-OUTPUT_DIR = REPO_ROOT / "slopcheck" / "src" / "lagrum"
+# This repository's own copy, beside ../ferenda (not ferenda/slopcheck).
+OUTPUT_DIR = Path(__file__).resolve().parents[1] / "src" / "lagrum"
 
 
 def build_grammar_js():
