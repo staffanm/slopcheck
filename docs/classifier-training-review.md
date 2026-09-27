@@ -455,3 +455,48 @@ long still abstain at every level.
 
 `backend/model-integrity.json` holds the size and SHA-256 of each file the server loads, per model
 directory. `get_model()` refuses a model that differs or has no entry.
+
+## Cited-unit and denial rules applied to the data; v6, a large model and browser students, 27 September 2026
+
+Two labelling rules, first applied to the legal-claims fixture (see docs/semantic-evaluation.md):
+a claim that denies or replaces something the source states is incorrect, not misleading; and a
+claim is judged against the unit it cites, so a main rule stated without an exception that the
+cited unit gives for that rule is misleading. A keyword filter picked 2,488 candidate rows in all
+partitions (supported rows whose source has "dock", "om inte" and similar words the claim lacks;
+misleading rows with "alltid", "endast" and similar). One Sonnet agent per batch of up to 30 rows
+decided each row; for test and calibration, an independent reviewer judged every proposed change
+and kept the stored label for 21 of 73. Decisions with reasons are in data/teacher/*.relabel.jsonl.
+Changes: test 33, calibration 19, validation 45, train 344, plus 78 in the rewrite and neighbour
+files. Most were misleading to incorrect under the denial rule (about 380 rows). The chunk pairs
+were rebuilt from the corrected rows.
+
+Scored on the corrected test partition (860 rows) and the corrected fixture (55 claims), each
+calibrated on the corrected calibration partition with scripts/calibrate_onnx.py:
+
+| | size | accuracy, 4 labels | accepted, precision | fixture: top label right, accepted, wrong |
+|---|---:|---:|---:|---|
+| KB-BERT v5 | 120 MB int8 | 0.702 | 538, 0.838 | 33, 14, 3 |
+| KB-BERT v6 (corrected data) | 120 MB int8 | 0.712 | 490, 0.843 | 35, 17, 3 |
+| KBLab Megatron-BERT-large 165k zero-shot, fine-tuned | 354 MB int8 | 0.745 | 607, 0.852 | 38, 37, 4 |
+| KB-BERT student, 4 layers, taught by v6 | 24.7 MB 4-bit | 0.686 | 270, 0.885 | 32, 2, 0 |
+| KB-BERT student, 4 layers, taught by the large model | 24.7 MB 4-bit | 0.657 | 366, 0.852 | 33, 8, 3 |
+| KB-BERT student, 3 layers, taught by v6 | 24.4 MB 4-bit | 0.498 | 116, 0.897 | 22, 1, 0 |
+| ScandiNLI-small, 4 labels, taught by v6 | 14.3 MB 4-bit | 0.646 | 210, 0.814 | 29, 2, 0 |
+
+The large model (models/classifier-megatron-large-4way-v1, trained with scripts/train_kb_bert.py
+--model-name KBLab/megatron-bert-large-swedish-cased-165-zero-shot --gradient-checkpointing) is
+3.3 times slower per input on CPU (1.6 s for 512 tokens here). Misleading passes calibration for
+no model.
+
+The students (scripts/distill_kb_bert.py) keep KB-BERT's width, 4 of its 12 layers and the 16,848
+tokens that legal Swedish uses at least five times, and learn from the teacher's probabilities
+and the gold labels. scripts/export_student.py writes them with 4-bit weights (MatMulNBits,
+GatherBlockQuantized), which onnxruntime-web 1.30 runs. The large teacher did not give a better
+student. Plain retraining of ScandiNLI on the corrected data (0.608 three-way) stayed below the
+shipped v2 (0.676).
+
+Privacy mode now ships the student taught by v6 (kb-bert-student-l4-v6-q4, four labels, the
+server's policy in fourLabelResult). In Chromium with scripts/benchmark-browser-model.mjs, on the
+corrected test partition: three-way accuracy 0.683 against 0.680 for ScandiNLI v2, 211 calibrated
+answers at 0.934 against 114 at 0.930, and "Stöd hittat" 37 times where v2 never gives it; 510 ms
+per row against 212 ms. The server still runs v5.
