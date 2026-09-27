@@ -77,7 +77,10 @@ class ClaimClassifier:
         }
         self.min_margin = 0.00
         self.mode = "window"  # "window": one BM25 window; "chunks": every chunk scored, pooled
-        self.model_name = "KB/bert-base-swedish-cased-int8"
+        # The base model the classifier was fine-tuned from, as the training script recorded it.
+        metadata = self.model_dir / "training_metadata.json"
+        base = json.loads(metadata.read_text(encoding="utf-8")).get("base_model") if metadata.exists() else None
+        self.model_name = f"{base or 'KB/bert-base-swedish-cased'}-int8"
         self.model_version = self.model_dir.name
         self.max_length = 512
 

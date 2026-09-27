@@ -499,4 +499,9 @@ Privacy mode now ships the student taught by v6 (kb-bert-student-l4-v6-q4, four 
 server's policy in fourLabelResult). In Chromium with scripts/benchmark-browser-model.mjs, on the
 corrected test partition: three-way accuracy 0.683 against 0.680 for ScandiNLI v2, 211 calibrated
 answers at 0.934 against 114 at 0.930, and "Stöd hittat" 37 times where v2 never gives it; 510 ms
-per row against 212 ms. The server still runs v5.
+per row against 212 ms.
+
+The server now runs the large model (`SERVER_MODEL=classifier-megatron-large-4way-v1` in `.env`,
+hashes in `backend/model-integrity.json`). On this machine with 3 threads a claim takes a median
+0.52 s. Its tokenizer is saved as `TokenizersBackend`, so the backend needs transformers 5.17 or
+later.
