@@ -758,7 +758,7 @@ $('#check').addEventListener('click', async () => {
     checkedBlocks = blocks.map(block => ({ ...block }));
     const occurrences = mergeOccurrences(await extract(checkedBlocks, signal, { local: isLocal }), checkedBlocks);
     signal.throwIfAborted();
-    rows = occurrences.map(occurrence => ({ occurrence, claim: semanticClaim(occurrence, claimContext(occurrence, checkedBlocks), checkedBlocks, occurrences), evidence: new Map(), semantic: new Map(occurrence.targets.map(target => [target.uri, { status: 'pending' }])), semanticRevision: 0 }));
+    rows = occurrences.map(occurrence => ({ occurrence, claim: semanticClaim(occurrence, claimContext(occurrence, checkedBlocks, occurrences), checkedBlocks, occurrences), evidence: new Map(), semantic: new Map(occurrence.targets.map(target => [target.uri, { status: 'pending' }])), semanticRevision: 0 }));
     for (const row of rows) for (const target of row.occurrence.targets) targets.set(target.uri, { ...target, status: 'pending', revision: 0 });
     reportName = selectedFile ? selectedFile.name : 'Inklistrad text';
     reportDate = new Date().toLocaleString('sv');

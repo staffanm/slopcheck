@@ -7,7 +7,7 @@ import { extractLocal } from '../src/lagrum-extract.js';
 
 function claims(blocks) {
   const occurrences = extractLocal(blocks);
-  return occurrences.map(occurrence => ({ occurrence, ...semanticClaim(occurrence, claimContext(occurrence, blocks), blocks, occurrences) }));
+  return occurrences.map(occurrence => ({ occurrence, ...semanticClaim(occurrence, claimContext(occurrence, blocks, occurrences), blocks, occurrences) }));
 }
 function one(text, citation = '4 § avtalslagen', extra = {}) {
   const start = text.lastIndexOf(citation);
@@ -130,4 +130,18 @@ test('the real PDFs pass through PDF.js, local extraction and claim preparation'
       }
     } finally { await task.destroy(); }
   }
+});
+
+test('a claim that starts with "Det gäller" includes the sentence before it, unless that sentence cites', () => {
+  const before = 'En annan viktig förändring är att förordningen även ska tillämpas på personuppgifter som behandlas för personer inom EU även om behandlingen sker utanför EU.';
+  const text = `Inledning. Flödet hindras inte. (https://www.imy.se/dataskydd/syfte/) ${before} Det gäller även behandling av uppgifter som syftar till att övervaka beteenden som sker inom EU. (Jfr prop. 2017/18:105 s. 19.) Nästa mening.`;
+  const [claim] = claims([{ id: 'text', text }]);
+  assert.equal(claim.assessable, true, claim.reason);
+  assert.equal(claim.hypothesis, `${before} Det gäller även behandling av uppgifter som syftar till att övervaka beteenden som sker inom EU.`);
+  const cited = `Förordningen gäller enligt artikel 3 i dataskyddsförordningen även utanför EU. Det gäller även övervakning inom EU. (Jfr prop. 2017/18:105 s. 19.)`;
+  const last = claims([{ id: 'text', text: cited }]).at(-1);
+  assert.equal(last.assessable, false);
+  const heading = '3.7.1 Pseudonymisering För att skydda den enskilde kan pseudonymisering användas. Det innebär att uppgifterna inte kan hänföras till den registrerade enligt artikel 4.5 GDPR.';
+  assert.equal(claims([{ id: 'text', text: heading }])[0].hypothesis,
+    'För att skydda den enskilde kan pseudonymisering användas. Det innebär att uppgifterna inte kan hänföras till den registrerade.');
 });

@@ -167,7 +167,28 @@ export function citationOnly(text) {
   return !text.replace(REFERENCE_SENTENCE, '').replace(/(?<!\p{L})(?:se|jfr|även|bl|a|t|ex|och)(?!\p{L})/giu, '').replace(/[^\p{L}\p{N}]/gu, '');
 }
 
-export function claimContext(occurrence, blocks) {
+// A sentence that starts like this refers back to the sentence before it.
+export const REFERS_BACK = /^(?:han|hon)\b|^(?:detta|det|den|de)\s+(?:är|var|ska|kan|gäller|följer|innebär)\b/i;
+
+// "…sker utanför EU. Det gäller även … (Jfr prop. …)": the claim starts one
+// sentence earlier, if that sentence is in the same paragraph and cites nothing.
+function referBack(block, segments, i, start, occurrences) {
+  if (i < 1 || !REFERS_BACK.test(block.text.slice(start).trimStart())) return start;
+  if (/\n\s*\n/.test(block.text.slice(segments[i - 1].index, segments[i].index))) return start;
+  // The sentence before starts after the last note in its segment ("… hindras.
+  // (https://…) En annan …"), which belongs to the sentence before that, and
+  // after a numbered heading that the PDF put on the same line.
+  const segment = segments[i - 1].segment;
+  const note = [...segment.matchAll(/(?:^|[.!?]["”')\]]*)\s*\([^()]*\)\s*/gu)].at(-1);
+  let offset = note ? note.index + note[0].length : 0;
+  if (!segment.slice(offset).trim()) return start;
+  offset += /^\d+(?:\.\d+)+\s+(?:\p{L}+\s+)*?\p{L}+\s+(?=\p{Lu}\p{Ll})/u.exec(segment.slice(offset))?.[0].length ?? 0;
+  const previous = segments[i - 1].index + offset;
+  const cited = occurrences.some(other => other.locations.some(l => l.block_id === block.id && l.start < start && l.end > previous));
+  return cited ? start : previous;
+}
+
+export function claimContext(occurrence, blocks, occurrences = [occurrence]) {
   const ranges = [];
   let incomplete = false;
   for (const location of occurrence.locations) {
@@ -190,13 +211,16 @@ export function claimContext(occurrence, blocks) {
     // the note of the sentence before that.
     const previousStart = samePara ? segments[index - 1].index + (leading(segments[index - 1])?.[0].length ?? 0) : 0;
     if (back && samePara && location.end <= segment.index + back[0].length) {
-      ranges.push({ block_id: block.id, start: previousStart, end: segment.index + back[0].length });
+      const start = referBack(block, segments, index - 1, previousStart, occurrences);
+      ranges.push({ block_id: block.id, start, end: segment.index + back[0].length });
       continue;
     }
     // A leading parenthesis that refers back belongs to the sentence before, so
     // another citation in this segment starts its claim after it.
     const own = back && samePara ? segment.index + back[0].length : segment.index;
-    const contextStart = citationOnly(withoutCitation) && samePara ? previousStart : own;
+    const contextStart = citationOnly(withoutCitation) && samePara
+      ? referBack(block, segments, index - 1, previousStart, occurrences)
+      : referBack(block, segments, index, own, occurrences);
     ranges.push({ block_id: block.id, start: contextStart, end: segment.index + segment.segment.length });
     // A PDF page can end mid-sentence, before a stamp emitted out of reading
     // order. Join only an unambiguous lowercase continuation on the next page.
