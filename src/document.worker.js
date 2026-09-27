@@ -1,11 +1,13 @@
+import './polyfills.js';
 import { pdfPageText, selectEvidence, validateBlocks } from './analysis.js';
 
 let pdfjsModule;
 
 async function getPdfjs() {
   if (!pdfjsModule) {
-    const pdfjs = await import('pdfjs-dist');
-    const { default: pdfWorkerUrl } = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
+    // The legacy build runs in older Safari; the standard build needs very new JavaScript.
+    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    const { default: pdfWorkerUrl } = await import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url');
     pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
     pdfjsModule = pdfjs;
   }

@@ -8,7 +8,7 @@ process.env.VITE_MODEL_VERSION = JSON.parse(readFileSync(new URL('./src/model-ma
 export default defineConfig({
   base: './',
   worker: { format: 'es' },
-  optimizeDeps: { include: ['@huggingface/tokenizers', 'onnxruntime-web/webgpu', 'pdfjs-dist', 'mammoth/mammoth.browser.js'] },
+  optimizeDeps: { include: ['@huggingface/tokenizers', 'onnxruntime-web/webgpu', 'pdfjs-dist/legacy/build/pdf.mjs', 'mammoth/mammoth.browser.js'] },
   server: {
     // Normal mode calls /api/match and /match. In dev, proxy them to the
     // deployed backend (override with SLOPCHECK_BACKEND). Integritetsläge needs no backend.
