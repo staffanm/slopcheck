@@ -25,7 +25,7 @@ def source_text(file: str) -> str:
 
 
 def load_legal_claims(path: Path = FIXTURE) -> list[dict]:
-    """All 70 rows. Rows labelled "nonsensical" have no model label: the claim
+    """All rows. Rows labelled "nonsensical" have no model label: the claim
     rules must reject them before any model runs."""
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     for row in rows:

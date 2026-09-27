@@ -70,7 +70,7 @@ The browser tries WebGPU and recovers locally through WASM if GPU initialization
 
 ## Corpus claims about statutes and judgments
 
-The [legal fixtures](../test/fixtures/legal-claims.jsonl) hold 70 claims against 14 real source texts
+The [legal fixtures](../test/fixtures/legal-claims.jsonl) hold 62 claims against 14 real source texts
 from the lagen.nu corpus: nine statute provisions and five judgments.
 [Source provenance](../test/fixtures/legal-sources/README.md) records their origin.
 Each row has the pair format of `data/*.jsonl` (`id`, `claim`, `label`, `sources`), with the
@@ -79,17 +79,31 @@ source text in a markdown file that `sources[].file` names. `scripts/legal_fixtu
 
 | Label | Claims | Meaning | Example |
 |---|---:|---|---|
-| supported | 24 | the source says this | 18 kap. 1 § RB: the losing party pays the other side's costs, om inte annat är stadgat |
-| misleading | 13 | true in part; a condition, exception or scope is dropped or widened | 2 § preskriptionslagen: “alla fordringar tio år”, denying the three-year consumer rule |
-| incorrect | 24 | a wrong number, a reversed outcome, the opposite rule, a true rule attributed to the wrong source, or a holding attributed to a court that did not make it | NJA 2005 s. 805: “pastorn ska dömas … till fängelse” (HD acquitted) |
-| unsupported | 1 | a rule the source does not state, attributed to it | 4 § avtalslagen cited for proprieborgen |
-| nonsensical | 8 | a category error, word salad, a citation list, or keywords without a verb; not a model label, the claim rules must reject it | “3 kap. 1 § brottsbalken slog fast att hovrätten är ett mord” |
+| supported | 17 | the source says this | 18 kap. 1 § RB: the losing party pays the other side's costs, om inte annat är stadgat |
+| misleading | 5 | the claim leaves out a condition or exception, or turns a hedge into an absolute, without contradicting a specific statement | 36 § avtalslagen: “ska alltid” for “får” |
+| incorrect | 30 | the claim contradicts something the source states: a number, the outcome, a stated condition, exception or alternative, or a holding of another court | NJA 2005 s. 805: “pastorn ska dömas … till fängelse” (HD acquitted) |
+| unsupported | 3 | the source does not address the claim | 4 § avtalslagen cited for proprieborgen |
+| nonsensical | 7 | a category error, word salad, a citation list, or keywords without a verb; not a model label, the claim rules must reject it | “3 kap. 1 § brottsbalken slog fast att hovrätten är ett mord” |
 
-Eight claims exist in two wordings, the second with the `-verb` suffix. The first run of the
-fixture found the natural wording unassessable because the claim verb list lacked `preskriberas`,
-`beräknas`, `omfattar`, `dömde` and `skulle`. Both wordings are assessable now, and the pair
-doubles as a paraphrase check. One claim keeps a `known_gap`: “preskriberas en fordran fem år
-efter tillkomsten” has five content words, and the claim rule needs six.
+Misleading and incorrect are split by one rule: a claim that denies or replaces something the
+source states (“utan undantag” against “om ej annat är stadgat”, “alltid livstid” against a
+stated alternative, “endast konsumenter” against “avtalsvillkor”) is incorrect; a claim that
+only leaves a condition out, or makes “får”, “i regel”, “bör” or “utgångspunkten” absolute, is
+misleading. A review on 26 September 2026 applied the rule and moved eleven claims from
+misleading to incorrect. It also moved two claims to unsupported: a rule from another act
+attributed to 2 § preskriptionslagen, and a claim about limitation periods cited to a judgment
+that does not mention them.
+
+A claim is judged against the unit it cites. “Enligt 4 § avtalslagen gäller ett antagande svar
+som kommer för sent som ett nytt anbud” is supported by 4 § första stycket, but misleading
+against all of 4 §, whose second paragraph makes an exception. The fixture claims cite whole
+sections, so three claims that state a main rule and leave out an exception in the same section
+are misleading. A claim that names its scope (“Huvudregeln i 2 § … är att …”) is not. Misleading
+has five claims, too few to measure that label well.
+
+Eight claims had a second wording that differed only in the verb. They were separate rows and
+counted twice in every score. The second wordings now live in `test/legal-claims.test.js`,
+which checks that the claim rules accept both.
 
 ### Label rule the tests enforce
 

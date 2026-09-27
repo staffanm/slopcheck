@@ -64,7 +64,9 @@ test('source passages preserve long sentences instead of cutting off their condi
 test('every corpus claim has a label, a frozen source, and a hypothesis without the citation', () => {
   assert.ok(cases.length >= 60);
   assert.equal(new Set(cases.map(item => item.id)).size, cases.length);
-  for (const label of LABELS) assert.ok(cases.filter(item => item.label === label).length >= (label === 'unsupported' ? 1 : 5), label);
+  // Every label occurs. Misleading has few claims since contradictions
+  // were relabelled incorrect; see docs/semantic-evaluation.md.
+  for (const label of LABELS) assert.ok(cases.some(item => item.label === label), label);
   for (const item of cases) {
     assert.ok(LABELS.includes(item.label), item.id);
     assert.ok(item.claim.includes(item.sources[0].citation), item.id);
@@ -105,9 +107,29 @@ test('the headnote, HFD reports and sub-headed chapters supply evidence', () => 
   assert.ok(hfd.evidence.excluded.every(p => p.role === 'reported'));
   assert.ok(hd.evidence.passages.some(p => p.role === 'summary' && p.text.includes('har ogillats med hänvisning till Europakonventionen')));
   assert.ok(hd.evidence.passages.some(p => p.role === 'decision' && p.text.includes('fastställer hovrättens domslut')));
-  for (const twin of cases.filter(item => item.id.endsWith('-verb'))) {
-    const original = cases.find(item => `${item.id}-verb` === twin.id);
-    assert.equal(input(twin).claim.assessable, true, twin.id);
-    assert.equal(input(original).claim.assessable, !original.known_gap, original.id);
+});
+
+// Second wordings of fixture claims. They test the claim verb list ("är",
+// "gäller", "ska" for "skulle") and are not separate gold rows.
+const REWORDED = {
+  'limitation-five-years': 'Enligt 2 § preskriptionslagen (1981:130) är preskriptionstiden för en fordran fem år från tillkomsten.',
+  'interest-eight-points': 'Dröjsmålsräntan är enligt 6 § räntelagen (1975:635) referensräntan med ett tillägg av åtta procentenheter.',
+  'interest-twelve-points': 'Dröjsmålsräntan är enligt 6 § räntelagen (1975:635) referensräntan med ett tillägg av tolv procentenheter.',
+  'ne-bis-in-idem-scope': 'Högsta domstolen har i NJA 2013 s. 502 slagit fast att rätten att inte bli lagförd två gånger för samma gärning gäller även systemet med skattetillägg och påföljd för skattebrott.',
+  'sermon-acquitted': 'Högsta domstolen har i NJA 2005 s. 805 funnit att åtalet mot en pastor för hets mot folkgrupp ska ogillas, eftersom en fällande dom sannolikt strider mot Europakonventionen.',
+  'sermon-convicted': 'HD har i NJA 2005 s. 805 slagit fast att pastorn ska dömas för hets mot folkgrupp till fängelse.',
+  'hiv-endangerment': 'HD har i NJA 2004 s. 176 funnit att en HIV-smittad man som haft oskyddade samlag utan att upplysa om smittan ska dömas för framkallande av fara för annan och inte för försök till grov misshandel.',
+  'hiv-attempted-assault': 'Högsta domstolen har i NJA 2004 s. 176 slagit fast att mannen ska dömas för försök till grov misshandel eftersom han varit likgiltig inför risken för smitta.',
+};
+
+test('both wordings of a claim are assessable', () => {
+  for (const [id, wording] of Object.entries(REWORDED)) {
+    const original = cases.find(item => item.id === id);
+    const { citation } = original.sources[0];
+    const start = wording.indexOf(citation);
+    const occurrence = { text: citation, locations: [{ block_id: 'text', start, end: start + citation.length }] };
+    const blocks = [{ id: 'text', text: wording }];
+    assert.equal(semanticClaim(occurrence, claimContext(occurrence, blocks), blocks).assessable, true, id);
+    assert.equal(input(original).claim.assessable, !original.known_gap, id);
   }
 });

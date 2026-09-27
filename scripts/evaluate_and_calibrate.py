@@ -6,7 +6,7 @@ Performs:
 2. Temperature scaling on the calibration partition to minimize NLL and ECE.
 3. Threshold and margin selection on calibration partition for target precisions.
 4. Source-grounding test suite verification (fictitious supported, contrary incorrect, unrelated unsupported).
-5. Independent 70-claim fixture evaluation under Section 3 cited unit rules.
+5. Independent legal-claims fixture evaluation under Section 3 cited unit rules.
 Outputs:
 - models/classifier-mmbert-small-4way/calibration.json
 - models/classifier-mmbert-small-4way/evaluation_report.json
@@ -413,7 +413,7 @@ def main():
     print(f"\nSource-grounding verification: {'ALL PASSED' if sg_all_passed else 'SOME FAILED'}")
 
     print("\n=======================================================")
-    print(" 4. INDEPENDENT 70-CLAIM FIXTURE EVALUATION")
+    print(" 4. INDEPENDENT LEGAL-CLAIMS FIXTURE EVALUATION")
     print("=======================================================")
     with open(args.fixtures_claims, "r", encoding="utf-8") as f:
         fixtures = [json.loads(line) for line in f if line.strip()]
