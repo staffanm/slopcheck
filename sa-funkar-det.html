@@ -47,12 +47,13 @@
         <tbody>
           <tr><td>Läsa filen</td><td>Din enhet</td><td>Ingenting</td></tr>
           <tr><td>Hitta hänvisningar</td><td>Din enhet</td><td>Ingenting (LagrumParser körs lokalt)</td></tr>
-          <tr><td>Kontrollera källorna</td><td>Din enhet + lagen.nu</td><td>Endast ett kort prefix av varje hänvisning, blandat med lockbeten (<em>k</em>-anonymitet). Servern kan inte se vilken hänvisning du slog upp</td></tr>
-          <tr><td>Välja källavsnitt</td><td>Din enhet</td><td>Ingenting (källor hämtas i volympaket)</td></tr>
+          <tr><td>Kontrollera källorna</td><td>Din enhet</td><td>Ingenting (ett filter över alla dokument och bestämmelser hämtas en gång från lagen.nu)</td></tr>
+          <tr><td>Hämta källtexterna</td><td>Din enhet + lagen.nu</td><td>Ett kort prefix av varje hänvisad bestämmelse, blandat med lockbeten till 128 förfrågningar (<em>k</em>-anonymitet). Servern kan inte se vilken hänvisning du slog upp</td></tr>
+          <tr><td>Välja källavsnitt</td><td>Din enhet</td><td>Ingenting</td></tr>
           <tr><td>Jämföra påståendet</td><td>Din enhet</td><td>Ingenting (den lokala modellen körs i webbläsaren)</td></tr>
         </tbody>
       </table>
-      <p class="note">Integritetsläget hämtar cirka 25 MB modellfiler och körmiljön första gången. Filerna hämtas från denna webbplats och sparas i webbläsarens cache för återanvändning. Den lokala modellen är mindre än serverns och bedömer färre påståenden.</p>
+      <p class="note">Integritetsläget hämtar cirka 25 MB modellfiler och körmiljön första gången. Filerna hämtas från denna webbplats och sparas i webbläsarens cache för återanvändning. Filtret från lagen.nu är cirka 21 MB och sparas i ett dygn. Den lokala modellen är mindre än serverns och bedömer färre påståenden.</p>
 
       <h2>Vad resultaten betyder</h2>
       <ul class="meanings">

@@ -2,12 +2,44 @@ import { test, expect } from '@playwright/test';
 import pasted from './fixtures/pasted-line-wrap.json' with { type: 'json' };
 import manifest from '../src/model-manifest.json' with { type: 'json' };
 import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { deflateRawSync } from 'node:zlib';
+import units from './fixtures/browser-units.json' with { type: 'json' };
 
 const invalidUri = 'https://lagen.nu/dom/nja/2013s372';
 const validUri = 'https://lagen.nu/1915:218#P4';
 const propUri = 'https://lagen.nu/prop/2025/26:28';
 const procedureUri = 'https://lagen.nu/1942:740#K18P7';
 const source = '**4 §** Antagande svar, som för sent kommer anbudsgivaren till handa, skall gälla såsom nytt anbud.\n\n**5 §** En annan regel.';
+
+// A /range/{prefix} answer over the fixture's units (ferenda lib/unitindex).
+function rangeAnswer(url, sourceText) {
+  const bits = Number(url.searchParams.get('bits') ?? 16);
+  const hex = url.pathname.split('/').pop();
+  const prefix = BigInt(`0x${hex}`) >> BigInt(4 * hex.length - bits);
+  const texts = {
+    'https://lagen.nu/1915:218#P4': sourceText.split('\n\n')[0],
+    'https://lagen.nu/1942:740#K18P7': '**7 §** Rätten ska se till att målet blir utrett.',
+    ...Object.fromEntries([115, 116, 117, 118].map((n, i) => [`${propUri}#sid${n}`,
+      ['Sidan 115.', 'Flera verksamhetsutövare i en koncern kan behöva rapportera samma incident.', 'Rapporteringen sker till tillsynsmyndigheten.', 'Sidan 118.'][i]])),
+  };
+  const entries = [];
+  for (const uri of units.units) {
+    const key = createHash('sha256').update(uri).digest().readBigUInt64BE(0);
+    if (key >> BigInt(64 - bits) !== prefix) continue;
+    const body = texts[uri] === undefined ? Buffer.alloc(0) : deflateRawSync(Buffer.from(texts[uri]));
+    const head = Buffer.alloc(10);
+    head.writeUInt32LE(Number((key >> BigInt(64 - bits - 32)) & 0xFFFFFFFFn), 0);
+    head.writeUInt16LE(Buffer.byteLength(uri), 4);
+    head.writeUInt32LE(texts[uri] === undefined ? 0xFFFFFFFF : body.length, 6);
+    entries.push(head, Buffer.from(uri), body);
+  }
+  const top = Buffer.alloc(9);
+  top.write('LUR1');
+  top.writeUInt8(bits, 4);
+  top.writeUInt32LE(entries.length / 3, 5);
+  return Buffer.concat([top, ...entries]);
+}
 
 async function mockApi(page, { failResolve = false, sourceText = source } = {}) {
   const requests = [];
@@ -36,25 +68,12 @@ async function mockApi(page, { failResolve = false, sourceText = source } = {}) 
         { type: 'stycke', page: 117, text: 'Rapporteringen sker till tillsynsmyndigheten.' },
         { type: 'stycke', page: 118, text: 'Sidan 118.' },
       ] } } });
+    } else if (url.pathname.endsWith('/range/filter')) {
+      if (failResolve) return route.abort('internetdisconnected');
+      await route.fulfill({ contentType: 'application/octet-stream', body: Buffer.from(units.filter, 'base64') });
     } else if (url.pathname.includes('/range/')) {
       if (failResolve) return route.abort('internetdisconnected');
-      await route.fulfill({
-        headers: { 'Content-Type': 'text/plain' },
-        body: '89ed57a135674719\ne760f4788dea8a3c\n',
-      });
-    } else if (url.pathname.includes('/packs/')) {
-      await route.fulfill({
-        json: {
-          pack: 'core',
-          documents: {
-            'https://lagen.nu/1915:218': {
-              title: 'Avtalslagen',
-              markdown: sourceText,
-              anchors: { P4: [0, sourceText.length] },
-            },
-          },
-        },
-      });
+      await route.fulfill({ contentType: 'application/octet-stream', body: rangeAnswer(url, sourceText) });
     } else await route.fulfill({ json: { markdown: sourceText } });
   });
   // The backend classifier (normal mode). Integritetsläge never reaches it.
@@ -96,7 +115,7 @@ test('checks occurrences, deduplicates targets, shows source evidence, and print
   await expect(page.locator('#document-content img')).toHaveCount(0);
   expect(requests.filter(r => r.url().includes('/resolve?'))).toHaveLength(2);
   expect(requests.filter(r => r.method() === 'POST')).toHaveLength(1);
-  expect(requests.find(r => r.method() === 'POST').postDataJSON()).toEqual({ text });
+  expect(requests.find(r => r.method() === 'POST').postDataJSON()).toMatchObject({ text });
   await page.getByLabel('Visa', { exact: true }).selectOption('invalid');
   await expect(page.locator('.result:visible')).toHaveCount(2);
   await expect(page.locator('.citation-mark')).toHaveCount(3);
@@ -276,6 +295,7 @@ test('model download failure abstains while source evidence remains available; r
   await expect(page.locator('.citation-mark.found')).toHaveCount(1);
   await expect(page.locator('.semantic-result.abstain')).toContainText('modellen kunde inte');
   await expect(page.locator('#retry-semantic')).toBeVisible();
+  await page.locator('.result summary').first().click();         // no result opens by itself
   await page.getByText('Visa bestämmelsen', { exact: true }).click();
   await expect(page.locator('.evidence blockquote').first()).toContainText('Antagande svar');
   await page.unroute('**/models/**');
@@ -347,6 +367,7 @@ test('a supported claim shows separate source validity, original evidence, and p
   await expect(page.locator('.badge.cite.found')).toHaveCount(1);
   // The local model compares the claim; whether it reaches a label depends on
   // the calibrated thresholds in the manifest, so only forbid a wrong one.
+  await page.locator('.result summary').first().click();         // no result opens by itself
   await expect(page.locator('.semantic-result')).toBeVisible();
   await expect(page.locator('.semantic-result.incorrect, .semantic-result.missing, .semantic-result.misleading')).toHaveCount(0);
   await expect(page.locator('.semantic-result')).toContainText('Ett sent svar');
@@ -398,6 +419,7 @@ test('normal mode compares claims on the server and renders the verdict', async 
   await expect(page.locator('#progress')).toBeHidden({ timeout: 30000 });
   await expect(page.locator('#report-meta')).toContainText('serverjämförelse');
   await expect(page.locator('.badge.sem.correct')).toBeVisible();
+  await page.locator('.result summary').first().click();         // no result opens by itself
   await expect(page.locator('.semantic-result.correct, .semantic-result.supported')).toBeVisible();
   await expect(page.locator('.decisive-evidence')).toContainText('Ett sent svar');
 });

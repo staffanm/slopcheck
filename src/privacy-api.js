@@ -1,70 +1,9 @@
-import { API, request, resolveTarget } from './api.js';
+import { request } from './api.js';
 import { NAMEDLAWS_DATA } from './lagrum/datasets.js';
-import {
-  OHTTP_CONFIG,
-  ohttpFetch,
-} from './ohttp.js';
+import { loadFilter, unitKey, unitText } from './unit-index.js';
 
-export { OHTTP_CONFIG, ohttpFetch };
-
-// Top-cited SFS statutes in the Core Statute Pack (top 250 in catalog.sqlite)
-const CORE_SFS = new Set([
-  '1736:0123_2', '1891:35_s.1', '1915:218', '1920:405', '1921:225', '1928:370', '1942:740', '1947:576',
-  '1949:105', '1949:381', '1953:272', '1956:623', '1957:297', '1958:637', '1960:729', '1962:381',
-  '1962:700', '1964:167', '1967:837', '1968:64', '1969:387', '1970:979', '1970:988', '1970:994',
-  '1971:289', '1971:291', '1971:69', '1971:948', '1972:207', '1972:429', '1972:620', '1972:719',
-  '1973:1149', '1973:1173', '1973:289', '1973:349', '1973:90', '1974:152', '1974:371', '1975:1385',
-  '1975:1418', '1975:635', '1976:125', '1976:580', '1977:1160', '1977:179', '1977:480', '1979:1152',
-  '1979:230', '1979:429', '1980:100', '1980:620', '1981:774', '1982:673', '1982:713', '1982:763',
-  '1982:80', '1984:387', '1985:1100', '1985:125', '1986:223', '1987:10', '1987:230', '1987:259',
-  '1987:619', '1987:667', '1987:672', '1988:534', '1988:870', '1988:950', '1989:529', '1990:324',
-  '1990:52', '1990:782', '1990:931', '1991:1128', '1991:1129', '1991:1469', '1991:45', '1991:481',
-  '1991:614', '1991:900', '1992:1434', '1992:859', '1993:100', '1993:1617', '1993:20', '1993:387',
-  '1993:581', '1993:787', '1993:891', '1994:1000', '1994:1009', '1994:1564', '1994:1738', '1994:1776',
-  '1994:200', '1995:1554', '1995:450', '1995:584', '1996:242', '1996:67', '1997:238', '1997:483',
-  '1997:857', '1998:1474', '1998:204', '1998:488', '1998:620', '1998:808', '1999:1078', '1999:1229',
-  '1999:1395', '2000:1225', '2000:980', '2001:453', '2002:160', '2003:389', '2004:168', '2004:297',
-  '2004:46', '2004:519', '2005:104', '2005:551', '2005:716', '2007:1091', '2007:1244', '2007:515',
-  '2007:528', '2008:355', '2008:486', '2008:567', '2008:579', '2009:366', '2009:400', '2010:110',
-  '2010:1622', '2010:2039', '2010:2043', '2010:361', '2010:610', '2010:659', '2010:696', '2010:751',
-  '2010:800', '2010:900', '2011:1244', '2011:203', '2014:801', '2015:315', '2016:1145', '2016:1146',
-  '2017:30', '2017:630', '2017:725', '2017:900', '2018:1138', '2018:1177', '2018:218', '2018:585',
-  '2025:400',
-]);
-
-// In-memory caches for range buckets and packs
-export const rangeBucketCache = new Map();
-export const packCache = new Map();
+// Documents fetched in normal mode, by uri
 export const documentCache = new Map();
-
-const PACK_CACHE_NAME = 'slopcheck-packs-v1';
-
-export async function getPackFromCache(packId) {
-  if (typeof caches === 'undefined') return null;
-  try {
-    const cache = await caches.open(PACK_CACHE_NAME);
-    const match = await cache.match(`/packs/${packId}`);
-    if (match) {
-      return match.json();
-    }
-  } catch {
-    // CacheStorage can throw in restricted contexts
-  }
-  return null;
-}
-
-export async function putPackInCache(packId, packData) {
-  if (typeof caches === 'undefined') return;
-  try {
-    const cache = await caches.open(PACK_CACHE_NAME);
-    const response = new Response(JSON.stringify(packData), {
-      headers: { 'Content-Type': 'application/json' },
-    });
-    await cache.put(`/packs/${packId}`, response);
-  } catch {
-    // Ignore cache write errors
-  }
-}
 
 export function canonicalUri(uri) {
   if (!uri) return '';
@@ -74,167 +13,6 @@ export function canonicalUri(uri) {
   } catch {
     return uri.trim();
   }
-}
-
-import { sha256Hex } from './sha256.js';
-
-export { sha256Hex };
-
-export function splitHash(hash, prefixLength = 3, suffixLength = 16) {
-  return {
-    prefix: hash.slice(0, prefixLength).toLowerCase(),
-    suffix: hash.slice(0, suffixLength).toLowerCase(),
-  };
-}
-
-export function hashSuffix(hash, length = 16) {
-  return (hash || '').slice(0, length).toLowerCase();
-}
-
-export function rootPrefix(hash, length = 3) {
-  return (hash || '').slice(0, length).toLowerCase();
-}
-
-/**
- * Deterministically maps a canonical legal URI to its static volume pack identifier.
- * Follows ferenda/lib/packs.py contract.
- */
-export function packIdForUri(uri, { ignoreCore = false } = {}) {
-  const clean = (uri || '').split('#')[0].trim();
-
-  // 1. SFS acts (Lag / förordning)
-  const sfsMatch = /^https:\/\/lagen\.nu\/(\d{4}):(\d+)/i.exec(clean);
-  if (sfsMatch) {
-    const sfsId = `${sfsMatch[1]}:${sfsMatch[2]}`;
-    if (!ignoreCore && CORE_SFS.has(sfsId)) {
-      return 'core';
-    }
-    const decade = sfsMatch[1].slice(0, 3) + '0s';
-    return `sfs/${decade}`;
-  }
-
-  // 2. NJA court cases (5-year volume blocks, e.g. nja/2010-2014)
-  const njaMatch = /^https:\/\/lagen\.nu\/dom\/nja\/(\d{4})s/i.exec(clean);
-  if (njaMatch) {
-    const year = parseInt(njaMatch[1], 10);
-    const startYear = Math.floor(year / 5) * 5;
-    return `nja/${startYear}-${startYear + 4}`;
-  }
-
-  // 3. Other Swedish court series (HFD, AD, RH, MD, MIG, etc.)
-  const courtMatch = /^https:\/\/lagen\.nu\/dom\/([a-z0-9_-]+)\/(\d{4})/i.exec(clean);
-  if (courtMatch) {
-    const court = courtMatch[1].toLowerCase();
-    const year = parseInt(courtMatch[2], 10);
-    const startYear = Math.floor(year / 5) * 5;
-    return `dom/${court}/${startYear}-${startYear + 4}`;
-  }
-
-  // 4. CELEX / EU Acquis (regulations, directives, CJEU case law sector 6, etc.)
-  // e.g. https://lagen.nu/celex/12012M/TXT, https://lagen.nu/celex/32016R0679, https://lagen.nu/celex/62015CJ0123
-  const celexMatch = /^https:\/\/lagen\.nu\/celex\/([0-9])(\d{4})/i.exec(clean);
-  if (celexMatch) {
-    const sector = celexMatch[1];
-    const year = celexMatch[2];
-    if (sector === '1') {
-      return 'celex/1';
-    }
-    return `celex/${sector}/${year}`;
-  }
-
-  // 5. Förarbeten: Propositioner (prop), SOU, Ds, Betänkanden
-  const propMatch = /^https:\/\/lagen\.nu\/prop\/(\d{4}(?:[-/]\d{2,4})?)/i.exec(clean);
-  if (propMatch) {
-    const sess = propMatch[1].replace('/', '-');
-    return `prop/${sess}`;
-  }
-  const souMatch = /^https:\/\/lagen\.nu\/sou\/(\d{4}):/i.exec(clean);
-  if (souMatch) {
-    return `sou/${souMatch[1]}`;
-  }
-  const dsMatch = /^https:\/\/lagen\.nu\/ds\/(\d{4}):/i.exec(clean);
-  if (dsMatch) {
-    return `ds/${dsMatch[1]}`;
-  }
-  const forarbeteMatch = /^https:\/\/lagen\.nu\/([a-z]+)\/(\d{4}):/i.exec(clean);
-  if (forarbeteMatch) {
-    return `${forarbeteMatch[1].toLowerCase()}/${forarbeteMatch[2]}`;
-  }
-
-  return 'other';
-}
-
-/**
- * Generates random 3-hex decoy prefixes to prevent traffic correlation.
- */
-export function generateDecoyPrefixes(realPrefixes, count = 3) {
-  const realSet = new Set(realPrefixes.map(p => p.toLowerCase()));
-  const decoys = [];
-  while (decoys.length < count) {
-    const val = Math.floor(Math.random() * 0x1000).toString(16).padStart(3, '0');
-    if (!realSet.has(val) && !decoys.includes(val)) {
-      decoys.push(val);
-    }
-  }
-  return decoys;
-}
-
-/**
- * Fetches a range bucket containing 16-hex hash suffixes matching the 3-hex root prefix.
- */
-export async function fetchRangeBucket(prefix, signal, { ohttp = OHTTP_CONFIG.enabled, sendDecoys = false } = {}) {
-  const normPrefix = prefix.toLowerCase();
-  if (rangeBucketCache.has(normPrefix)) {
-    return rangeBucketCache.get(normPrefix);
-  }
-
-  if (sendDecoys) {
-    const decoys = generateDecoyPrefixes([normPrefix], 2);
-    // Fire decoys in the background without awaiting them
-    for (const decoy of decoys) {
-      if (!rangeBucketCache.has(decoy)) {
-        const fetcher = ohttp
-          ? ohttpFetch(`range/${decoy}`, { signal, headers: { accept: 'text/plain' } }).then(r => r.text())
-          : request(`range/${decoy}`, { signal, headers: { accept: 'text/plain, application/json' } });
-        fetcher.then(res => {
-          parseBucketResponse(res);
-        }).catch(() => {});
-      }
-    }
-  }
-
-  const promise = (async () => {
-    try {
-      const response = ohttp
-        ? await ohttpFetch(`range/${normPrefix}`, { signal, headers: { accept: 'text/plain' } }).then(r => r.text())
-        : await request(`range/${normPrefix}`, { signal, headers: { accept: 'text/plain, application/json' } });
-      return parseBucketResponse(response);
-    } catch (err) {
-      rangeBucketCache.delete(normPrefix);
-      throw err;
-    }
-  })();
-
-  rangeBucketCache.set(normPrefix, promise);
-  return promise;
-}
-
-export function parseBucketResponse(data) {
-  const suffixes = new Set();
-  if (typeof data === 'string') {
-    for (const line of data.split('\n')) {
-      const trimmed = line.trim().toLowerCase();
-      if (trimmed) {
-        // Take first 16 hex characters (64-bit suffix)
-        suffixes.add(trimmed.slice(0, 16));
-      }
-    }
-  } else if (data && Array.isArray(data.suffixes)) {
-    for (const s of data.suffixes) suffixes.add(s.trim().slice(0, 16).toLowerCase());
-  } else if (data && typeof data === 'object') {
-    for (const key of Object.keys(data)) suffixes.add(key.trim().slice(0, 16).toLowerCase());
-  }
-  return suffixes;
 }
 
 /**
@@ -332,30 +110,17 @@ export function formatDisplayTitle(rootUri) {
 }
 
 /**
- * Resolves a citation URI anonymously via k-anonymity range lookup in a SINGLE round-trip.
- * Bucket prefix is sha256(root_uri)[:3]. The bucket co-locates the parent document and all its pinpoints.
- * Suffixes are truncated to 16 hex characters (64 bits).
- * Falls back to direct resolve if the range endpoint is not yet supported on the backend.
+ * Resolves a citation without a request that names it: the unit filter
+ * (unit-index.js) says whether the document and the cited provision exist.
  */
-export async function resolveTargetPrivate(uri, signal, { fallbackToResolve = false, sendDecoys = false } = {}) {
+export async function resolveTargetPrivate(uri, signal) {
   const canonical = canonicalUri(uri);
   const rootUri = canonical.split('#')[0];
-  const rootHash = await sha256Hex(rootUri);
-  const prefix = rootHash.slice(0, 3).toLowerCase();
-  const rootSuffix = rootHash.slice(0, 16).toLowerCase();
-
-  let bucket;
-  try {
-    bucket = await fetchRangeBucket(prefix, signal, { sendDecoys });
-  } catch (error) {
-    if (fallbackToResolve) {
-      return resolveTarget(uri, signal);
-    }
-    throw error;
-  }
-
-  const rootFound = bucket.has(rootSuffix) || CORE_SFS.has(rootUri.split('/').pop());
   const hasPinpoint = canonical.includes('#');
+  const filter = await loadFilter(signal);
+  if (!filter) throw new Error('Integritetslägets filter kunde inte hämtas från lagen.nu. Försök igen.');
+  const rootFound = filter.has(await unitKey(rootUri));
+  const targetFound = hasPinpoint && filter.has(await unitKey(canonical));
   const displayTitle = formatDisplayTitle(rootUri);
   const identifier = rootUri.split('/').pop();
 
@@ -373,11 +138,6 @@ export async function resolveTargetPrivate(uri, signal, { fallbackToResolve = fa
       result: undefined,
     };
   }
-
-  // Citation has a pinpoint fragment: check parent root URI and pinpoint anchor in the SAME bucket
-  const targetHash = await sha256Hex(canonical);
-  const targetSuffix = targetHash.slice(0, 16).toLowerCase();
-  const targetFound = bucket.has(targetSuffix);
 
   if (targetFound) {
     const fragment = canonical.split('#')[1];
@@ -575,116 +335,26 @@ export function getProvisionText(docData, uri) {
 }
 
 /**
- * Loads a static volume pack (e.g. "core" or "sfs/2010s").
- * Uses browser CacheStorage when available.
+ * A document's source text. In privacy mode it is the cited unit's own text,
+ * fetched among fillers by prefetchUnits; nothing is fetched by uri.
  */
-export async function loadPack(packId, signal) {
-  if (packCache.has(packId)) {
-    return packCache.get(packId);
-  }
-
-  const promise = (async () => {
-    try {
-      let data = await getPackFromCache(packId);
-      if (!data) {
-        if (OHTTP_CONFIG.enabled) {
-          const res = await ohttpFetch(`packs/${packId}`, { signal });
-          data = res.json();
-          await putPackInCache(packId, data);
-        } else {
-          if (typeof caches !== 'undefined') {
-            try {
-              const res = await fetch(`${API}/packs/${packId}`, {
-                signal,
-                credentials: 'omit',
-                referrerPolicy: 'no-referrer',
-              });
-              if (res.ok) {
-                const cache = await caches.open(PACK_CACHE_NAME);
-                await cache.put(`/packs/${packId}`, res.clone());
-                data = await res.json();
-              }
-            } catch {
-              // Fall through to request()
-            }
-          }
-          if (!data) {
-            data = await request(`packs/${packId}`, { signal });
-            await putPackInCache(packId, data);
-          }
-        }
-      }
-
-      if (data && typeof data.documents === 'object') {
-        for (const [docUri, docData] of Object.entries(data.documents)) {
-          if (docData && typeof docData === 'object' && !docData.markdown) {
-            const converted = artifactToMarkdown(docData);
-            docData.markdown = converted.markdown;
-            docData.anchors = converted.anchors;
-            docData.title = docData.title || converted.title;
-          }
-          documentCache.set(canonicalUri(docUri), docData);
-        }
-      }
-      return data;
-    } catch (err) {
-      packCache.delete(packId);
-      throw err;
-    }
-  })();
-
-  packCache.set(packId, promise);
-  return promise;
-}
-
-/**
- * Pre-fetches the Core Statute Pack in the background during initialization.
- */
-export async function prefetchCorePack(signal) {
-  try {
-    return await loadPack('core', signal);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Retrieves a document source text, prioritizing local pack caches in Privacy Mode.
- */
-export async function getDocumentSource(uri, signal, { privacyMode = false } = {}) {
+export async function getDocumentSource(uri, signal, { privacyMode = false, unit = null } = {}) {
   const rootUri = canonicalUri(uri.split('#')[0]);
-
-  // 1. Check in-memory document cache
+  if (privacyMode) {
+    const cited = canonicalUri(unit ?? uri);
+    const own = unitText(cited);
+    if (own === null) throw new Error('Hänvisningen gäller hela dokumentet. Integritetsläget hämtar bara text för enskilda bestämmelser.');
+    if (own === undefined) throw new Error('Källtexten kunde inte hämtas anonymt. Försök igen.');
+    const fragment = cited.split('#')[1];
+    return { uri: rootUri, markdown: own, anchors: fragment ? { [fragment]: [0, own.length] } : {} };
+  }
   if (documentCache.has(rootUri)) {
     return documentCache.get(rootUri);
   }
 
-  // 2. In privacy mode, attempt to load the document from its static pack
-  if (privacyMode) {
-    const packId = packIdForUri(rootUri);
-    try {
-      await loadPack(packId, signal);
-      if (documentCache.has(rootUri)) {
-        return documentCache.get(rootUri);
-      }
-      // If packId was 'core' but the document was not included, try its era volume pack
-      if (packId === 'core') {
-        const volumePackId = packIdForUri(rootUri, { ignoreCore: true });
-        if (volumePackId && volumePackId !== 'core') {
-          await loadPack(volumePackId, signal);
-          if (documentCache.has(rootUri)) {
-            return documentCache.get(rootUri);
-          }
-        }
-      }
-    } catch {
-      // Pack endpoint not available or missing; fall back to direct document fetch
-    }
-  }
-
-  // 3. Fallback to direct document fetch. The markdown format has no page
-  // markers, so a förarbete is fetched as a structured artifact and converted
-  // here, which yields sidN anchors for page pinpoints.
+  // The markdown format has no page markers, so a förarbete is fetched as a
+  // structured artifact and converted here, which yields sidN anchors for page
+  // pinpoints.
   const paged = /^\/(?:prop|sou|ds|bet)\//.test(new URL(rootUri).pathname);
   const response = await request(`document?${new URLSearchParams(paged ? { uri: rootUri } : { uri: rootUri, format: 'md' })}`, { signal });
   if (response && typeof response === 'object' && !response.markdown) {

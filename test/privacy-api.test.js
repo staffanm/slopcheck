@@ -1,21 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   canonicalUri,
-  sha256Hex,
-  splitHash,
-  hashSuffix,
-  rootPrefix,
-  packIdForUri,
-  generateDecoyPrefixes,
   isDeterministicAbsence,
   resolveTargetPrivate,
-  rangeBucketCache,
   documentCache,
-  packCache,
   getDocumentSource,
   getProvisionText,
 } from '../src/privacy-api.js';
+import { prefetchUnits } from '../src/unit-index.js';
 import { provisionText, selectEvidence } from '../src/analysis.js';
 
 test('canonicalUri normalizes scheme and host while preserving exact path and fragment case', () => {
@@ -34,68 +28,6 @@ test('canonicalUri normalizes scheme and host while preserving exact path and fr
   );
 });
 
-test('sha256Hex, rootPrefix, and hashSuffix produce deterministic 3-hex root prefix and 16-hex suffix', async () => {
-  const rootUri = 'https://lagen.nu/1915:218';
-  const rootHash = await sha256Hex(rootUri);
-  assert.equal(typeof rootHash, 'string');
-  assert.equal(rootHash.length, 64);
-
-  const prefix = rootPrefix(rootHash, 3);
-  assert.equal(prefix.length, 3);
-  assert.match(prefix, /^[0-9a-f]{3}$/);
-
-  const rootSuffix = hashSuffix(rootHash, 16);
-  assert.equal(rootSuffix.length, 16);
-  assert.match(rootSuffix, /^[0-9a-f]{16}$/);
-
-  const { prefix: spPrefix, suffix: spSuffix } = splitHash(rootHash, 3, 16);
-  assert.equal(spPrefix, prefix);
-  assert.equal(spSuffix, rootSuffix);
-});
-
-test('packIdForUri deterministically maps URIs to core and volume packs', () => {
-  // Core statutes
-  assert.equal(packIdForUri('https://lagen.nu/1915:218#P1'), 'core');
-  assert.equal(packIdForUri('https://lagen.nu/1970:994#K12P1'), 'core');
-
-  // Decade SFS
-  assert.equal(packIdForUri('https://lagen.nu/2024:9999'), 'sfs/2020s');
-  assert.equal(packIdForUri('https://lagen.nu/1890:999'), 'sfs/1890s');
-
-  // NJA 5-year blocks
-  assert.equal(packIdForUri('https://lagen.nu/dom/nja/2013s502'), 'nja/2010-2014');
-  assert.equal(packIdForUri('https://lagen.nu/dom/nja/2024s100'), 'nja/2020-2024');
-
-  // Other Swedish courts (5-year blocks)
-  assert.equal(packIdForUri('https://lagen.nu/dom/hfd/2022:15'), 'dom/hfd/2020-2024');
-  assert.equal(packIdForUri('https://lagen.nu/dom/ad/2018:3'), 'dom/ad/2015-2019');
-  assert.equal(packIdForUri('https://lagen.nu/dom/rh/2011:4'), 'dom/rh/2010-2014');
-
-  // CELEX EU acts (sector + year volume packs, or celex/1)
-  assert.equal(packIdForUri('https://lagen.nu/celex/32016R0679#32'), 'celex/3/2016');
-  assert.equal(packIdForUri('https://lagen.nu/celex/32024R1689'), 'celex/3/2024');
-  assert.equal(packIdForUri('https://lagen.nu/celex/62015CJ0123'), 'celex/6/2015');
-  assert.equal(packIdForUri('https://lagen.nu/celex/12012M/TXT'), 'celex/1');
-
-  // Förarbeten
-  assert.equal(packIdForUri('https://lagen.nu/prop/1997/98:44'), 'prop/1997-98');
-  assert.equal(packIdForUri('https://lagen.nu/prop/2020/21:12'), 'prop/2020-21');
-  assert.equal(packIdForUri('https://lagen.nu/sou/2021:1'), 'sou/2021');
-  assert.equal(packIdForUri('https://lagen.nu/ds/2023:5'), 'ds/2023');
-});
-
-test('generateDecoyPrefixes creates distinct random 3-hex buckets', () => {
-  const real = ['a1b', 'c3d'];
-  const decoys = generateDecoyPrefixes(real, 4);
-  assert.equal(decoys.length, 4);
-  for (const d of decoys) {
-    assert.match(d, /^[0-9a-f]{3}$/);
-    assert.ok(!real.includes(d));
-  }
-  // All decoys must be unique
-  assert.equal(new Set(decoys).size, 4);
-});
-
 test('isDeterministicAbsence classifies known publication boundaries', () => {
   // NJA before 1874 is invalid
   assert.equal(isDeterministicAbsence('https://lagen.nu/dom/nja/1870s1'), true);
@@ -109,50 +41,50 @@ test('isDeterministicAbsence classifies known publication boundaries', () => {
   assert.equal(isDeterministicAbsence('https://lagen.nu/dom/nja/2026s99999'), false);
 });
 
-test('resolveTargetPrivate finds exact hash match in single 3-hex root bucket', async () => {
-  rangeBucketCache.clear();
-  const rootUri = 'https://lagen.nu/1915:218';
-  const pinUri = 'https://lagen.nu/1915:218#P4';
+// lagen.nu as the client sees it: the filter and the answers of the ferenda
+// fixture (test/fixtures/unit-index.json); every other bucket is empty.
+const fixture = JSON.parse(readFileSync(new URL('./fixtures/unit-index.json', import.meta.url)));
+const requested = [];
+globalThis.fetch = async url => {
+  const path = new URL(url).pathname;
+  requested.push(String(url));
+  if (path.endsWith('/range/filter')) return new Response(Buffer.from(fixture.filter, 'base64'));
+  if (path.endsWith(`/range/${fixture.prefix.toString(16).padStart(4, '0')}`)) return new Response(Buffer.from(fixture.answer, 'base64'));
+  return new Response(Buffer.from('LUR1\x10\0\0\0\0', 'latin1'));
+};
 
-  const rootHash = await sha256Hex(rootUri);
-  const rootPrefixStr = rootHash.slice(0, 3).toLowerCase();
-  const rootSuffixStr = rootHash.slice(0, 16).toLowerCase();
-
-  const pinHash = await sha256Hex(pinUri);
-  const pinSuffixStr = pinHash.slice(0, 16).toLowerCase();
-
-  // Co-locate root and pinpoint in the SAME root-prefixed bucket
-  rangeBucketCache.set(rootPrefixStr, Promise.resolve(new Set([rootSuffixStr, pinSuffixStr])));
-
-  const res = await resolveTargetPrivate(pinUri, null, { fallbackToResolve: false });
+test('resolveTargetPrivate finds a provision the filter holds', async () => {
+  const res = await resolveTargetPrivate('https://lagen.nu/1915:218#P36', null);
   assert.equal(res.status, 'found');
-  assert.equal(res.result.uri, rootUri);
-  assert.equal(res.result.pin.uri, pinUri);
+  assert.equal(res.result.uri, 'https://lagen.nu/1915:218');
+  assert.equal(res.result.pin.uri, 'https://lagen.nu/1915:218#P36');
 });
 
-test('resolveTargetPrivate classifies missing pinpoint as invalid when root exists in single bucket', async () => {
-  rangeBucketCache.clear();
-  const rootUri = 'https://lagen.nu/1915:218';
-  const invalidPinUri = 'https://lagen.nu/1915:218#K12P1';
-
-  const rootHash = await sha256Hex(rootUri);
-  const rootPrefixStr = rootHash.slice(0, 3).toLowerCase();
-  const rootSuffixStr = rootHash.slice(0, 16).toLowerCase();
-
-  // Bucket contains root, but does NOT contain the invalid pinpoint
-  rangeBucketCache.set(rootPrefixStr, Promise.resolve(new Set([rootSuffixStr])));
-
-  const res = await resolveTargetPrivate(invalidPinUri, null, { fallbackToResolve: false });
+test('resolveTargetPrivate calls a provision the document lacks invalid', async () => {
+  const res = await resolveTargetPrivate('https://lagen.nu/1915:218#P99', null);
   assert.equal(res.status, 'invalid');
   assert.equal(res.reason, 'Bestämmelsen saknas i författningen.');
 });
 
-test('getDocumentSource retrieves markdown from documentCache', async () => {
+test('in privacy mode the source is the unit text, fetched among fillers and never by uri', async () => {
+  const unit = 'https://lagen.nu/1915:218#P36';
+  await assert.rejects(getDocumentSource(unit, null, { privacyMode: true, unit }), /kunde inte hämtas/);
+  requested.length = 0;
+  const found = await prefetchUnits([unit, 'https://lagen.nu/1915:218#P99'], null);
+  assert.deepEqual([...found], [unit]);
+  assert.equal(requested.length, 128);
+  assert.ok(requested.every(url => /\/range\/[0-9a-f]{4}\?bits=16$/.test(url)));
+  const doc = await getDocumentSource(unit, null, { privacyMode: true, unit });
+  assert.equal(doc.markdown, fixture.text);
+  assert.deepEqual(doc.anchors, { P36: [0, fixture.text.length] });
+});
+
+test('getDocumentSource retrieves markdown from documentCache in normal mode', async () => {
   documentCache.clear();
   const uri = 'https://lagen.nu/1915:218';
   documentCache.set(uri, { markdown: '# Avtalslagen\n\n**1 §**' });
 
-  const doc = await getDocumentSource(uri, null, { privacyMode: true });
+  const doc = await getDocumentSource(uri, null);
   assert.equal(doc.markdown, '# Avtalslagen\n\n**1 §**');
 });
 

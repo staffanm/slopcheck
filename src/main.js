@@ -1,5 +1,6 @@
 import './style.css';
-import { extract, getDocumentSource, pool, prefetchCorePack, request, resolveTarget, resolveTargetPrivate, stopExtractionWorker } from './api.js';
+import { extract, getDocumentSource, pool, request, resolveTarget, resolveTargetPrivate, stopExtractionWorker } from './api.js';
+import { loadFilter, prefetchUnits } from './unit-index.js';
 import { claimContext, claimSegments, invalidCitationMessage, mergeOccurrences, occurrenceStatus, validateBlocks } from './analysis.js';
 import { matchesFilter, rowSemantic, SEMANTIC, judgmentAt, localCandidate, semanticClaim, labelCandidate } from './semantic.js';
 import { semanticClient } from './semantic-client.js';
@@ -549,7 +550,7 @@ async function checkTarget(target, signal) {
   const isLocal = Boolean($('#local-mode')?.checked);
   try {
     const resolution = isLocal
-      ? await resolveTargetPrivate(target.uri, signal, { fallbackToResolve: false, sendDecoys: true })
+      ? await resolveTargetPrivate(target.uri, signal)
       : await resolveTarget(target.uri, signal);
     signal.throwIfAborted();
     Object.assign(target, resolution);
@@ -561,9 +562,11 @@ async function checkTarget(target, signal) {
   target.revision++;
   updateReport();
   if (target.status !== 'found') return;
+  const unit = target.result?.pin?.uri ?? target.result?.uri ?? target.uri;
+  // in privacy mode each unit is its own source; otherwise the whole document is shared
+  const uri = isLocal ? unit : (target.result?.uri ?? target.uri).split('#')[0];
   try {
-    const uri = (target.result?.uri ?? target.uri).split('#')[0];
-    if (!sourceCache.has(uri)) sourceCache.set(uri, getDocumentSource(uri, signal, { privacyMode: isLocal }));
+    if (!sourceCache.has(uri)) sourceCache.set(uri, getDocumentSource(uri, signal, { privacyMode: isLocal, unit }));
     const source = await sourceCache.get(uri);
     const markdown = source?.markdown ?? source?.text;
     if (typeof markdown !== 'string') throw new Error('API:t returnerar ingen källtext.');
@@ -576,7 +579,7 @@ async function checkTarget(target, signal) {
   } catch (error) {
     if (signal.aborted) throw error;
     target.sourceError = error.message;
-    sourceCache.delete((target.result?.uri ?? target.uri).split('#')[0]);
+    sourceCache.delete(uri);
   }
   target.revision++;
   updateReport();
@@ -739,7 +742,7 @@ if ($('#local-mode')) {
   updatePrivacyNote();
   $('#local-mode').addEventListener('change', () => {
     updatePrivacyNote();
-    if ($('#local-mode').checked) prefetchCorePack();
+    if ($('#local-mode').checked) loadFilter().catch(() => null);
   });
 }
 
@@ -773,6 +776,12 @@ $('#check').addEventListener('click', async () => {
     $('#report-heading').tabIndex = -1;
     $('#report-heading').focus({ preventScroll: true });
     $('#report').scrollIntoView({ block: 'start' });
+    if (isLocal) {
+      progress('Hämtar källtexter anonymt från lagen.nu…');
+      await prefetchUnits([...targets.keys()], signal).catch(error => {
+        if (error.name === 'AbortError') throw error;
+      });
+    }
     await checkTargets([...targets.values()], signal);
     await compareClaims(signal);
   } catch (error) {
@@ -788,7 +797,9 @@ $('#retry').addEventListener('click', async () => {
   busy(true);
   $('#error').hidden = true;
   try {
-    await checkTargets([...targets.values()].filter(target => target.status === 'error' || target.sourceError), signal);
+    const failed = [...targets.values()].filter(target => target.status === 'error' || target.sourceError);
+    if ($('#local-mode')?.checked) await prefetchUnits(failed.map(target => target.uri), signal);
+    await checkTargets(failed, signal);
     await compareClaims(signal);
   } catch (error) {
     if (error.name !== 'AbortError') displayError(error);

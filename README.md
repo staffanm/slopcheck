@@ -89,18 +89,27 @@ Original files remain in the browser in both modes.
   uris to `/resolve` and `/document`, and each claim with its source passages to
   the slopcheck backend (`/api/match`). The backend logs only the call (path and
   status), not the claim, the source or the result.
-- **Privacy mode** sends no text and no claim. The browser extracts the citations
-  and runs the comparison. For existence it asks `GET /api/v1/range/{prefix}`
-  with the first 3 hex characters of the document uri's hash, plus 2 random
-  decoy prefixes. The text comes from static packs (`GET /api/v1/packs/{id}`, a
-  segment such as `sfs/1990s` or `celex/3/2016`). The server still learns which
-  bucket and which pack. A document that is not in its pack is fetched from
-  `/document` directly, which names it.
+- **Privacy mode** sends no text, no claim and no cited uri. The browser
+  extracts the citations and runs the comparison.
+  - Existence: the browser downloads one filter over every document and
+    provision (`GET /api/v1/range/filter`, about 21 MB, cached for a day) and
+    checks each citation locally.
+  - Text: each cited provision (or a judgment without provisions) is fetched
+    with `GET /api/v1/range/{prefix}?bits=16`. The prefix is the first 16 bits
+    of the hash of the provision's own uri. An answer holds about 143 units of
+    unrelated documents. A check sends 128 such requests (or a multiple of 128)
+    in random order, the real ones among fillers. The fillers are the same on
+    every check from one browser and are drawn half from the most cited
+    provisions.
+  - The server learns 128 buckets and not which of them are real. A citation of
+    a whole document that has provisions ("brottsbalken") gets no text in
+    privacy mode.
 
-The app stores only the mode preference in `localStorage`. No documents are
-stored in `localStorage`, `IndexedDB`, caches, or a service worker. Model assets
-and packs use versioned Cache Storage caches; documents and inference results
-never enter them. No analytics, remote fonts, or runtime CDN dependencies are
+The app stores the mode preference and the secret that picks the filler
+requests in `localStorage`. No documents are stored in `localStorage`,
+`IndexedDB`, caches, or a service worker. Model assets, the filter and the
+range answers use versioned Cache Storage caches; documents and inference
+results never enter them. No analytics, remote fonts, or runtime CDN dependencies are
 used. Reloading or clearing the document removes the session's report.
 
 ## Features
@@ -183,7 +192,7 @@ See [the deployed API test report](docs/api-test-drive.md) for the judgment chec
 | `index.html`, `src/style.css` | Swedish interface and print layout |
 | `src/main.js` | Session state, file selection, progress, and report rendering |
 | `src/api.js` | Extraction, resolution, source requests, and request concurrency |
-| `src/privacy-api.js`, `src/ohttp.js` | Privacy mode: range buckets, decoys, packs, and the (disabled) OHTTP client |
+| `src/privacy-api.js`, `src/unit-index.js`, `src/ohttp.js` | Privacy mode: existence from the filter, unit text among filler requests, and the (disabled) OHTTP client |
 | `src/polyfills.js` | `ReadableStream` async iteration for older Safari |
 | `src/analysis.js` | Text normalization and offset mapping, inline spans, claim context, source selection, quote matching, and PDF line assembly |
 | `src/lagrum-extract.js` | Browser-side citation extraction coordinator, span filtering, and block location mapping |
