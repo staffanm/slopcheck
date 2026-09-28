@@ -87,7 +87,8 @@ Original files remain in the browser in both modes.
 
 - **Normal mode** sends the document's text to lagen.nu for extraction, the cited
   uris to `/resolve` and `/document`, and each claim with its source passages to
-  the slopcheck backend (`/api/match`). The backend keeps no log of request bodies.
+  the slopcheck backend (`/api/match`). The backend logs only the call (path and
+  status), not the claim, the source or the result.
 - **Privacy mode** sends no text and no claim. The browser extracts the citations
   and runs the comparison. For existence it asks `GET /api/v1/range/{prefix}`
   with the first 3 hex characters of the document uri's hash, plus 2 random

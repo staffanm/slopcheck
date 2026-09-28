@@ -360,11 +360,6 @@ class ClaimClassifier:
             swedish_label = mapped["swedish_label"]
             reason = mapped["reason"]
 
-        logger.info(
-            f"classified claim: status={status}, label={label}, "
-            f"conf={confidence:.3f}, margin={margin:.3f}, len={token_length}"
-        )
-
         chunk_summary = None
         if run["chunks"]:
             # The chunk that decided the predicted class is the evidence shown.
