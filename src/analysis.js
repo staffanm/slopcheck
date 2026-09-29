@@ -496,10 +496,11 @@ function median(numbers) {
 function inlinePdfFootnotes(lines) {
   if (lines.length < 3) return null;
   // Body font = the height carrying the most characters, so a few small note
-  // lines never move it.
+  // lines never move it. Heights are rounded to half points: 10.6 pt notes under
+  // 12 pt body text must not round up to 11.
   const chars = new Map();
   for (const line of lines) for (const item of line.items) {
-    const height = Math.round(item.height);
+    const height = Math.round(item.height * 2) / 2;
     chars.set(height, (chars.get(height) ?? 0) + item.str.trim().length);
   }
   const bodyFont = [...chars.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
@@ -511,34 +512,59 @@ function inlinePdfFootnotes(lines) {
     const weights = new Map();
     for (const item of line.items) {
       if (/^\d{1,3}$/.test(item.str.trim())) continue;
-      const height = Math.round(item.height);
+      const height = Math.round(item.height * 2) / 2;
       weights.set(height, (weights.get(height) ?? 0) + item.str.trim().length);
     }
     return [...weights.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? median(line.items.map(item => item.height));
   };
-  let start = lines.length;
-  while (start > 0 && lineFont(lines[start - 1]) <= bodyFont * 0.9) start--;
-  const region = lines.slice(start);
-  if (!region.length || region.length > lines.length * 0.55) return null;
+  // A page number can follow the notes in the body font ("28", "! 33").
+  let end = lines.length;
+  while (end > 0 && /^[^\p{L}]{1,6}$/u.test(lines[end - 1].items.map(item => item.str).join('').trim())) end--;
+  let start = end;
+  while (start > 0 && lineFont(lines[start - 1]) < bodyFont) start--;
+  if (start === end) return null;
+  // A raised marker of the last body line can come just before the notes in
+  // the content stream; only lines below the body text are notes. A page
+  // number emitted first is not body text, whatever its font.
+  const bodyBottom = Math.min(...lines.slice(0, start)
+    .filter(line => lineFont(line) >= bodyFont && line.items.some(item => /\p{L}/u.test(item.str))).map(line => line.y));
+  const noteLines = lines.slice(start, end).filter(line => line.y < bodyBottom);
+  if (!noteLines.length || noteLines.length > lines.length * 0.55) return null;
+  // Rebuild the note rows by position, not by content-stream order: some PDFs
+  // emit each note number after its note text, a few points higher. Items less
+  // than half a note line apart in height form one row, read left to right.
+  const noteItems = noteLines.flatMap(line => line.items).sort((a, b) => b.y - a.y || a.x - b.x);
+  const tolerance = median(noteItems.filter(item => !/^\d{1,3}$/.test(item.str.trim())).map(item => item.height)) * 0.5;
+  const region = [];
+  for (const item of noteItems) {
+    const row = region.at(-1);
+    if (row && row.y - item.y <= tolerance) row.items.push(item);
+    else region.push({ y: item.y, items: [item] });
+  }
+  for (const row of region) row.items.sort((a, b) => a.x - b.x);
   const regionText = line => line.items.map(item => item.str).join(' ').replace(/\s+/g, ' ').trim();
   if (!/^\d{1,3}\b/.test(regionText(region[0]))) return null;
 
   const notes = new Map();
   let current = null;
-  for (const line of region) {
+  region.forEach((line, index) => {
     const text = regionText(line);
-    if (/^\d{1,3}$/.test(text)) continue; // a page number below the notes
+    const next = region[index + 1] && regionText(region[index + 1]);
+    // A raised note number can form a row of its own above its note text.
+    if (/^\d{1,3}$/.test(text) && next && /\p{L}/u.test(next)) { current = text; notes.set(current, notes.get(current) ?? ''); return; }
+    // A last row without letters is a page number below the notes ("32", "! 32").
+    if (!/\p{L}/u.test(text) && (!next || /^\d{1,3}$/.test(text))) return;
     const lead = /^(\d{1,3})[.)\]]?\s+(.*)$/.exec(text);
     if (lead) { current = lead[1]; notes.set(current, `${notes.has(current) ? `${notes.get(current)} ` : ''}${lead[2]}`); }
     else if (current) notes.set(current, `${notes.get(current)} ${text}`);
-  }
+  });
   for (const [number, text] of notes) {
     const trimmed = text.replace(/\s+/g, ' ').trim();
     if (trimmed) notes.set(number, trimmed); else notes.delete(number);
   }
   if (!notes.size) return null;
 
-  const body = lines.slice(0, start);
+  const body = lines.filter(line => !noteLines.includes(line));
   let matched = 0;
   for (const line of body) {
     for (const item of line.items) {
@@ -558,17 +584,34 @@ export function pdfPageText(items) {
   for (const item of items) {
     if (!('str' in item) || !item.str.trim()) continue;
     const y = item.transform[5];
-    if (!line || Math.abs(line.y - y) > Math.max(2, item.height * 0.3)) {
+    // A raised note marker belongs to the line it sits on, even a few points up.
+    const marker = line && item.height <= line.height * 0.75 && Math.abs(line.y - y) <= line.height * 0.5;
+    if (!line || (!marker && Math.abs(line.y - y) > Math.max(2, item.height * 0.3))) {
       line = { y, height: item.height, items: [] };
       lines.push(line);
     }
-    line.items.push({ str: item.str, height: item.height });
+    line.items.push({ str: item.str, height: item.height, x: item.transform[4], y });
   }
-  const render = source => source.map((current, index) => {
-    const previous = source[index - 1];
-    const separator = !previous ? '' : Math.abs(previous.y - current.y) > Math.max(previous.height, current.height) * 1.8 ? '\n\n' : ' ';
-    return separator + current.items.map(item => item.str).join(' ').replace(/\s+/g, ' ').trim();
-  }).join('').trim();
+  // A PDF can emit a line's note markers after its text; read each line left to right.
+  for (const current of lines) current.items.sort((a, b) => a.x - b.x);
+  const render = source => {
+    // A paragraph break is a gap well above the page's usual line pitch. A
+    // thesis set with 1.5 or double spacing has a pitch above 1.8 font heights.
+    // The pitch is the lower quartile of the gaps between lines of one font
+    // size, so paragraph gaps and raised note markers do not move it.
+    const gaps = source.slice(1).map((current, index) => [source[index], current])
+      .filter(([previous, current]) => Math.abs(previous.height - current.height) <= current.height * 0.1
+        && Math.abs(previous.y - current.y) > current.height * 0.8)
+      .map(([previous, current]) => Math.abs(previous.y - current.y))
+      .sort((a, b) => a - b);
+    const pitch = gaps.length >= 3 ? gaps[Math.floor(gaps.length / 4)] : 0;
+    return source.map((current, index) => {
+      const previous = source[index - 1];
+      const gap = previous && Math.abs(previous.y - current.y);
+      const separator = !previous ? '' : gap > Math.max(Math.max(previous.height, current.height) * 1.8, pitch * 1.25) ? '\n\n' : ' ';
+      return separator + current.items.map(item => item.str).join(' ').replace(/\s+/g, ' ').trim();
+    }).join('').trim();
+  };
   return render(inlinePdfFootnotes(lines) ?? lines);
 }
 

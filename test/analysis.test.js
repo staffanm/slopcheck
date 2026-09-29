@@ -157,6 +157,79 @@ test('the extraction options leave out a bare act, a law named in passing and a 
     ['mål C-434/16', ['celex/62016CJ0434']]]);
 });
 
+test('a raised note number on a line of its own above its note text still starts the note', () => {
+  // A Word thesis page: 6.5 pt note numbers sit 3–4 pt above their 10 pt note text.
+  const it = (str, y, height) => ({ str, transform: [1, 0, 0, 1, 60, y], height });
+  const items = [
+    it('Enskilda saknar som regel samhällets resurser att göra omfattande utredningar.', 700, 12), it('38', 704, 8),
+    it('Förundersökningen ska dock inte återupptas om det saknas behov av utredningsåtgärder.', 679, 12), it('39', 683, 8),
+    it('Det konstateras emellertid att den enskilde har en svag ställning i resningsärenden.', 658, 12),
+    it('38', 88.4, 6.5), it('Olsson, JT 2009/10 s. 993.', 85.1, 10),
+    it('39', 77.4, 6.5), it('Prop. 2011/12:156 s. 33.', 73.1, 10),
+    it('17', 40, 10),
+  ];
+  const text = pdfPageText(items);
+  assert.match(text, /utredningar\. \(Olsson, JT 2009\/10 s\. 993\.\)/);
+  assert.match(text, /utredningsåtgärder\. \(Prop\. 2011\/12:156 s\. 33\.\)/);
+  assert.match(text, /\(Olsson, JT 2009\/10 s\. 993\.\) Förundersökningen/);
+});
+
+test('10.6 pt notes under 12 pt body text move inline', () => {
+  const it = (str, y, height) => ({ str, transform: [1, 0, 0, 1, 60, y], height });
+  const items = [
+    it('Det är varken nytt eller unikt att hämta ledning för tolkningen i lag eller förarbeten.', 341, 12), it('70', 345, 8.5),
+    it('Vidare kan man fråga sig vad som avses med den sistnämnda tolkningsfaktorn.', 321, 12),
+    it('70', 115, 8.5), it('Se t.ex. NJA 1981 s. 323.', 111, 10.6),
+  ];
+  assert.match(pdfPageText(items), /förarbeten\. \(Se t\.ex\. NJA 1981 s\. 323\.\)\s+Vidare/);
+});
+
+test('1.5-spaced lines stay one paragraph; a larger gap still starts a new one', () => {
+  // 13 pt text at a 24 pt pitch (above 1.8 font heights), a paragraph gap of 32 pt.
+  const it = (str, y, height = 13) => ({ str, transform: [1, 0, 0, 1, 90, y], height });
+  const items = [
+    it('Oracle och kommissionen var av åsikten att det inte handlade om en försäljning', 638),
+    it('utan om en överföring till allmänheten enligt artikel 3.1 Infosoc, vilken inte kan', 615),
+    it('konsumeras. Det här avfärdades av domstolen då artikel 1.2 a Infosoc', 591), it('83', 595, 8.7),
+    it('uttryckligen stadgar att direktivet inte ska påverka befintliga', 567),
+    it('unionsbestämmelser om det rättsliga skyddet för datorprogram.', 543),
+    it('saknas i direktivet är artikel 4.2 är den som tillämpas.', 520),
+    it('Domstolen menade även att det följer av artikel 6.1 WCT att en överföring', 488),
+  ];
+  const text = pdfPageText(items);
+  assert.match(text, /^Oracle och kommissionen[^\n]+Infosoc 83 uttryckligen stadgar[^\n]+tillämpas\.\n\nDomstolen menade/);
+});
+
+test('a note number that follows its note text in the content stream still starts the note', () => {
+  // Each 6.7 pt number comes after its 10 pt note text, 3 pt higher and to the left,
+  // with "! 32" as the page number below the notes.
+  const it = (str, y, height, x = 90) => ({ str, transform: [1, 0, 0, 1, x, y], height });
+  const items = [
+    it('Oracle menade att det inte gällde en faktisk försäljning av programmet.', 489, 13),
+    it('Licensen innebar enbart en rätt för kunderna att ladda ned programmet.', 465, 13),
+    it('Domstolen fann därför att det var fråga om ett köp av datorprogrammet.', 441, 13), it('81', 445, 8.7, 377),
+    it('Det vore poänglöst att köpa licensen om den inte gav rätten att använda programvaran.', 417, 13), it('82', 421, 8.7, 258),
+    it('Se skäl 5 i direktiv 2009/24.', 95, 10, 99), it('81', 98, 6.7),
+    it('Mål C-128/11, p. 44.', 74, 10, 99), it('82', 77, 6.7),
+    it('!', 38, 10, 295), it('32', 38, 10, 300),
+  ];
+  const text = pdfPageText(items);
+  assert.match(text, /datorprogrammet\. \(Se skäl 5 i direktiv 2009\/24\.\)/);
+  assert.match(text, /programvaran\. \(Mål C-128\/11, p\. 44\.\)\n\n! 32$/);
+});
+
+test('11 pt notes under 12 pt body text, a marker emitted late and a body-font page number after the notes', () => {
+  const it = (str, y, height, x = 85) => ({ str, transform: [1, 0, 0, 1, x, y], height });
+  const items = [
+    it('Den innebär att ersättning bara utgår om skadan faller inom det skyddade intresset.', 715, 12),
+    it('skyddar.', 693, 12), it('Det klassiska smuggelexemplet illustrerar detta: konkurrenternas', 693, 12, 145), it('85', 695.7, 8, 128),
+    it('inkomstbortfall ersätts inte, eftersom smuggelstadgans syfte är att värna statens skatteintäkter.', 671, 12),
+    it('Jfr prop. 1972:5, s. 159 f.', 139.1, 11, 96), it('85', 141.6, 7.3),
+    it('28', 59.4, 12, 291),
+  ];
+  assert.match(pdfPageText(items), /skyddar\. \(Jfr prop\. 1972:5, s\. 159 f\.\) Det klassiska smuggelexemplet illustrerar detta: konkurrenternas inkomstbortfall/);
+});
+
 test('pdfPageText leaves a page without footnotes unchanged', () => {
   const it = (str, y, height = 12) => ({ str, transform: [1, 0, 0, 1, 60, y], height });
   const items = [it('Enligt 4 § avtalslagen gäller regeln.', 700), it('Sidan 1', 60, 12)];
