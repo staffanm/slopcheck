@@ -158,7 +158,7 @@ class CitedUnitResolver:
         if cached_file.exists():
             try:
                 with open(cached_file, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    return self._unwrap(json.load(f))
             except Exception:
                 pass
 
@@ -184,6 +184,13 @@ class CitedUnitResolver:
 
         return None
 
+    @staticmethod
+    def _unwrap(data: Optional[dict]) -> Optional[dict]:
+        # The document API returns the artifact inside an envelope with its metadata.
+        if isinstance(data, dict) and "structure" not in data and isinstance(data.get("artifact"), dict):
+            return data["artifact"]
+        return data
+
     def _cached_path(self, clean_uri: str) -> Path:
         safe_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", clean_uri) + ".json"
         return self.cache_dir / safe_name
@@ -191,12 +198,20 @@ class CitedUnitResolver:
     def _load_from_local_artifact(self, clean_uri: str) -> Optional[dict]:
         if not self.artifact_dir.exists():
             return None
+        # A ferenda checkout stores artifacts either brotli-compressed or as plain JSON.
+        for ext in (".json.br", ".json"):
+            doc = self._load_local_with_ext(clean_uri, ext)
+            if doc:
+                return doc
+        return None
+
+    def _load_local_with_ext(self, clean_uri: str, ext: str) -> Optional[dict]:
 
         # SFS: e.g. https://lagen.nu/1915:218 -> sfs/1915/218.json.br
         sfs_match = re.search(r"lagen\.nu/(\d{4}):(\d+)", clean_uri)
         if sfs_match:
             year, num = sfs_match.groups()
-            path = self.artifact_dir / "sfs" / year / f"{num}.json.br"
+            path = self.artifact_dir / "sfs" / year / f"{num}{ext}"
             if path.exists():
                 return self._read_json_br(path)
 
@@ -204,7 +219,7 @@ class CitedUnitResolver:
         prop_match = re.search(r"lagen\.nu/prop/(\d{4})/(\d+):(\d+)", clean_uri)
         if prop_match:
             y1, y2, num = prop_match.groups()
-            filename = f"{y1}-{y2}-{num}.json.br"
+            filename = f"{y1}-{y2}-{num}{ext}"
             path = self.artifact_dir / "forarbete" / "prop" / y1 / filename
             if path.exists():
                 return self._read_json_br(path)
@@ -217,7 +232,7 @@ class CitedUnitResolver:
         dom_match = re.search(r"lagen\.nu/dom/([a-z]+)/(\d{4})s(\d+)", clean_uri)
         if dom_match:
             court, year, page = dom_match.groups()
-            filename = f"{court.upper()}_{year}_s_{page}.json.br"
+            filename = f"{court.upper()}_{year}_s_{page}{ext}"
             path = self.artifact_dir / "dom" / filename
             if path.exists():
                 return self._read_json_br(path)
@@ -225,11 +240,11 @@ class CitedUnitResolver:
         dom_num_match = re.search(r"lagen\.nu/dom/([a-z]+)/(\d{4}):(\d+)", clean_uri)
         if dom_num_match:
             court, year, num = dom_num_match.groups()
-            filename = f"{court.upper()}_{year}_nr_{num}.json.br"
+            filename = f"{court.upper()}_{year}_nr_{num}{ext}"
             path = self.artifact_dir / "dom" / filename
             if path.exists():
                 return self._read_json_br(path)
-            filename_ref = f"{court.upper()}_{year}_ref_{num}.json.br"
+            filename_ref = f"{court.upper()}_{year}_ref_{num}{ext}"
             path_ref = self.artifact_dir / "dom" / filename_ref
             if path_ref.exists():
                 return self._read_json_br(path_ref)
@@ -239,10 +254,10 @@ class CitedUnitResolver:
             court, docket = dom_docket_match.groups()
             docket_clean = re.sub(r"[^A-Za-z0-9]", "_", docket)
             patterns = [
-                f"{court.upper()}_{docket_clean}.json.br",
-                f"{court.upper()}O_{docket_clean}.json.br",
-                f"{court.upper()[:2]}O_{docket_clean}.json.br",
-                f"{court.upper()}_{docket}.json.br"
+                f"{court.upper()}_{docket_clean}{ext}",
+                f"{court.upper()}O_{docket_clean}{ext}",
+                f"{court.upper()[:2]}O_{docket_clean}{ext}",
+                f"{court.upper()}_{docket}{ext}"
             ]
             for p_name in patterns:
                 p_path = self.artifact_dir / "dom" / p_name
@@ -253,7 +268,7 @@ class CitedUnitResolver:
         celex_match = re.search(r"lagen\.nu/celex/([0-9A-Z]+)", clean_uri)
         if celex_match:
             celex = celex_match.group(1)
-            found = list((self.artifact_dir / "eurlex").glob(f"**/{celex}.json.br"))
+            found = list((self.artifact_dir / "eurlex").glob(f"**/{celex}{ext}"))
             if found:
                 return self._read_json_br(found[0])
 
@@ -265,18 +280,20 @@ class CitedUnitResolver:
             req = urllib.request.Request(api_url, headers={"Accept": "application/json", "User-Agent": "slopcheck-resolver"})
             with urllib.request.urlopen(req, timeout=10) as resp:
                 if resp.status == 200:
-                    return json.loads(resp.read().decode("utf-8"))
+                    return self._unwrap(json.loads(resp.read().decode("utf-8")))
         except Exception:
             return None
         return None
 
     def _read_json_br(self, path: Path) -> Optional[dict]:
-        if not brotli:
+        if path.suffix == ".br" and not brotli:
             raise RuntimeError("brotli package is required to read .json.br artifacts")
         try:
             with open(path, "rb") as f:
-                decompressed = brotli.decompress(f.read()).decode("utf-8")
-                return json.loads(decompressed)
+                data = f.read()
+            if path.suffix == ".br":
+                data = brotli.decompress(data)
+            return json.loads(data.decode("utf-8"))
         except Exception:
             return None
 
@@ -324,8 +341,8 @@ class CitedUnitResolver:
         if re.search(r"lagen\.nu/\d{4}:\d+", clean_uri):
             return self._resolve_statute(doc, clean_uri, fragment, citation)
 
-        # 2. Proposition (Prop)
-        if "lagen.nu/prop" in clean_uri:
+        # 2. Proposition, SOU, Ds and committee directive: cited pages
+        if re.search(r"lagen\.nu/(?:prop|sou|ds|dir)/", clean_uri):
             return self._resolve_proposition(doc, clean_uri, fragment, citation)
 
         # 3. Court Judgment (HD, HFD, AD, etc.)
@@ -386,6 +403,9 @@ class CitedUnitResolver:
 
         target_p_id = f"P{p_match.group(1)}" if p_match else None
         target_s_id = f"S{s_match.group(1)}" if s_match else None
+        # A current ferenda artifact qualifies the node id by its chapter ("K6P4", "K6P4S1").
+        full_match = re.match(r"(?:K\d+[a-z]?)?P\d+[a-z]*", fragment)
+        full_p_id = full_match.group(0) if full_match else None
 
         matched_p_node = None
         matched_s_node = None
@@ -395,12 +415,12 @@ class CitedUnitResolver:
             if isinstance(node, dict):
                 node_id = node.get("id") or ""
                 # Match paragraph
-                if target_p_id and (node_id == target_p_id or node_id.endswith(f"_{target_p_id}") or target_p_id in node_id.split("_")):
+                if target_p_id and (node_id == full_p_id or node_id == target_p_id or node_id.endswith(f"_{target_p_id}") or target_p_id in node_id.split("_")):
                     matched_p_node = node
                     if target_s_id:
                         for child in node.get("children", []):
                             child_id = child.get("id") or ""
-                            if target_s_id in child_id:
+                            if child_id == f"{full_p_id}{target_s_id}" or target_s_id in child_id:
                                 matched_s_node = child
                                 return
                     return
@@ -471,6 +491,8 @@ class CitedUnitResolver:
         - Cited page (#sid25) or page range.
         - Every node whose 'page' equals cited page.
         """
+        # "prop_page", "sou_page", "ds_page" or "dir_page"
+        kind = re.search(r"lagen\.nu/(prop|sou|ds|dir)/", clean_uri).group(1)
         page_num = None
         sid_match = re.search(r"sid(\d+)", fragment) or re.search(r"s\.\s*(\d+)", citation)
         if sid_match:
@@ -484,7 +506,7 @@ class CitedUnitResolver:
                 "status": "abstain",
                 "abstain_reason": "unit_unbounded",
                 "text": "",
-                "unit_type": "prop_whole",
+                "unit_type": f"{kind}_whole",
                 "citation": citation,
                 "source_id": clean_uri,
                 "document_id": clean_uri,
@@ -514,7 +536,7 @@ class CitedUnitResolver:
             "status": "ok" if text else "abstain",
             "abstain_reason": None if text else "pinpoint_not_found",
             "text": text,
-            "unit_type": "prop_page",
+            "unit_type": f"{kind}_page",
             "citation": citation,
             "source_id": f"{clean_uri}#sid{page_num}",
             "document_id": clean_uri,
