@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any, Optional
 import urllib.request
@@ -139,6 +140,35 @@ def extract_node_text(node: Any) -> str:
         children = "\n\n".join(filter(None, (extract_node_text(c) for c in node.get("children", []))))
         return "\n\n".join(filter(None, (own, children)))
     return ""
+
+
+def markdown_text(markdown: str) -> str:
+    """lagen.nu's markdown as plain text: links, emphasis, heading and quote marks
+    and escapes removed; paragraphs kept."""
+    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", markdown)
+    text = re.sub(r"(?m)^[ \t]*(?:#{1,6}|>)[ \t]?", "", text)
+    text = re.sub(r"\*\*|__|(?<!\w)[*_](?=\S)|(?<=\S)[*_](?!\w)", "", text)
+    text = re.sub(r"\\([\\`*_{}\[\]()#+\-.!>])", r"\1", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def paragraph_range(citation: str, fragment: str, cjeu: bool = False) -> list[int]:
+    """The numbered paragraphs a judgment citation points at: "p. 26", "punkterna
+    7–9", "p. 42 och 45" in the citation text, or "#p26" / "#point-26" in the uri.
+    A dash is a range; "och" (and, for the EU court, a comma) lists two paragraphs."""
+    separators = r"och|–|-|," if cjeu else r"och|–|-"
+    match = (re.search(rf"\bp(?:unkt(?:erna)?)?\.?\s*(\d+)(?:\s*({separators})\s*(\d+))?", citation, re.IGNORECASE)
+             or re.fullmatch(r"(?:p|point-)(\d+)(?:(-)(\d+))?", fragment or ""))
+    if not match:
+        return []
+    start = int(match.group(1))
+    if not match.group(3):
+        return [start]
+    end = int(match.group(3))
+    if match.group(2) in ("och", ","):
+        return [start, end]
+    # A "range" of more than ten paragraphs is a misread list, not a span.
+    return list(range(start, end + 1)) if start <= end <= start + 10 else [start]
 
 
 class CitedUnitResolver:
@@ -297,10 +327,69 @@ class CitedUnitResolver:
         except Exception:
             return None
 
+    def fetch_unit(self, uri: str) -> tuple[str, str]:
+        """The text of one cited unit ("…/1915:218#P36", "…/prop/2008/09:232#sid25")
+        from lagen.nu's document endpoint, as plain text. Returns (status, text):
+        "ok", "document_not_found", "pinpoint_not_found" or "unreachable". Found
+        units are cached on disk; a missing pinpoint is not, since lagen.nu can
+        add page data later."""
+        cached_file = self.cache_dir / ("unit_" + re.sub(r"[^a-zA-Z0-9_\-]", "_", uri) + ".json")
+        if cached_file.exists():
+            try:
+                return "ok", json.loads(cached_file.read_text(encoding="utf-8"))["text"]
+            except Exception:
+                pass
+        api_url = f"https://lagen.nu/api/v1/document?{urllib.parse.urlencode({'uri': uri, 'format': 'md'})}"
+        request = urllib.request.Request(api_url, headers={"Accept": "application/json", "User-Agent": "slopcheck-resolver"})
+        for attempt in range(4):
+            try:
+                with urllib.request.urlopen(request, timeout=60) as resp:
+                    text = markdown_text(json.loads(resp.read().decode("utf-8")).get("markdown") or "")
+                cached_file.write_text(json.dumps({"uri": uri, "text": text}, ensure_ascii=False), encoding="utf-8")
+                return "ok", text
+            except urllib.error.HTTPError as error:
+                if error.code == 404:
+                    detail = json.loads(error.read() or b"{}").get("detail", "")
+                    return ("document_not_found" if detail.startswith("no document") else "pinpoint_not_found"), ""
+                if error.code not in (429, 500, 502, 503, 504):
+                    return "unreachable", ""
+            except (urllib.error.URLError, TimeoutError, ConnectionError):
+                pass
+            time.sleep(2 ** attempt)
+        return "unreachable", ""
+
+    def _units(self, clean_uri: str, fragments: list[str], unit_type: str, source_id: str, citation: str) -> dict[str, Any]:
+        """One or more units of a document (pages 83–84, paragraphs 7–9), joined.
+        The first must exist; a later one that does not is left out."""
+        texts = []
+        for index, fragment in enumerate(fragments):
+            status, text = self.fetch_unit(f"{clean_uri}#{fragment}")
+            if status != "ok":
+                if index == 0:
+                    reason = {"document_not_found": "source_not_found"}.get(status, status)
+                    return {"status": "abstain", "abstain_reason": reason, "text": "", "unit_type": unit_type,
+                            "citation": citation, "source_id": source_id, "document_id": clean_uri}
+                continue
+            texts.append(text)
+        text = "\n\n".join(filter(None, texts)).strip()
+        return {
+            "status": "ok" if text else "abstain",
+            "abstain_reason": None if text else "pinpoint_not_found",
+            "text": text,
+            "unit_type": unit_type,
+            "citation": citation,
+            "source_id": source_id,
+            "document_id": clean_uri,
+        }
+
     def resolve(self, uri: str, citation: str = "") -> dict[str, Any]:
         """
         Resolves the exact cited unit for a given URI (and optional citation string)
-        under Section 3 rules of the PRD.
+        under Section 3 rules of the PRD. A pinpointed unit is fetched from
+        lagen.nu's document endpoint; what is cut here is what that endpoint
+        does not decide: which units a whole document or chapter citation stands
+        for, and the pinpoint a citation carries only in its text ("p. 26",
+        "s. 83 f.", see ferenda#112).
         """
         # Resolve named case if uri is not a full URL or is a case nickname
         if not uri.startswith("http"):
@@ -325,35 +414,61 @@ class CitedUnitResolver:
         clean_uri = uri.split("#")[0]
         fragment = uri.split("#")[1] if "#" in uri else ""
 
+        def abstain(reason, unit_type, source_id=uri):
+            return {"status": "abstain", "abstain_reason": reason, "text": "", "unit_type": unit_type,
+                    "citation": citation, "source_id": source_id, "document_id": clean_uri}
+
+        # 1. Statute: a whole act or chapter is not one comparable unit.
+        if re.search(r"lagen\.nu/\d{4}:\d+", clean_uri):
+            if not fragment:
+                return abstain("unit_unbounded", "statute_act", clean_uri)
+            if re.fullmatch(r"K\d+[a-z]?", fragment):
+                return abstain("unit_unbounded", "statute_chapter")
+            unit_type = ("statute_stycke" if re.search(r"P\d+[a-z]*S\d+", fragment)
+                         else "statute_provision" if re.search(r"P\d", fragment) else "document_unit")
+            return self._units(clean_uri, [fragment], unit_type, uri, citation)
+
+        # 2. Proposition, SOU, Ds, committee directive and committee report: the cited
+        # page, and the next ones for "s. 83 f." / "s. 83 ff.".
+        kind = re.search(r"lagen\.nu/(prop|sou|ds|dir|bet)/", clean_uri)
+        if kind:
+            page = re.search(r"sid(\d+)", fragment) or re.search(r"s\.\s*(\d+)", citation)
+            if not page:
+                return abstain("unit_unbounded", f"{kind.group(1)}_whole", clean_uri)
+            first = int(page.group(1))
+            following = re.search(r"\bs\.\s*\d+\s*(ff?)\b\.?", citation)
+            extra = {"f": 1, "ff": 2}.get(following.group(1), 0) if following else 0
+            return self._units(clean_uri, [f"sid{p}" for p in range(first, first + extra + 1)],
+                               f"{kind.group(1)}_page", f"{clean_uri}#sid{first}", citation)
+
+        # 3. Court judgment: numbered paragraphs, or the deciding court's own text.
+        if "lagen.nu/dom" in clean_uri:
+            pinpoints = paragraph_range(citation, fragment)
+            if pinpoints:
+                source_id = f"{clean_uri}#p{pinpoints[0]}" + (f"-{pinpoints[-1]}" if len(pinpoints) > 1 else "")
+                return self._units(clean_uri, [f"p{n}" for n in pinpoints], "case_pinpoint", source_id, citation)
+            doc = self.load_artifact(clean_uri)
+            return self._resolve_judgment(doc, clean_uri, citation) if doc else abstain("source_not_found", "unknown")
+
+        # 4. EU: a judgment's numbered paragraphs or its assessment; an act's article.
+        if "lagen.nu/celex/6" in clean_uri:
+            pinpoints = paragraph_range(citation, fragment, cjeu=True)
+            if pinpoints:
+                source_id = f"{clean_uri}#p{pinpoints[0]}" + (f"-{pinpoints[-1]}" if len(pinpoints) > 1 else "")
+                return self._units(clean_uri, [f"point-{n}" for n in pinpoints], "cjeu_pinpoint", source_id, citation)
+            doc = self.load_artifact(clean_uri)
+            return self._resolve_cjeu(doc, clean_uri, citation) if doc else abstain("source_not_found", "unknown")
+        if "lagen.nu/celex/" in clean_uri and fragment:
+            return self._units(clean_uri, [fragment], "eu_article", uri, citation)
+
+        # 5. Any other document cited at a unit (a treaty article, a regulation §).
+        if fragment:
+            return self._units(clean_uri, [fragment], "document_unit", uri, citation)
+
+        # Default fallback: the whole document
         doc = self.load_artifact(clean_uri)
         if not doc:
-            return {
-                "status": "abstain",
-                "abstain_reason": "source_not_found",
-                "text": "",
-                "unit_type": "unknown",
-                "citation": citation,
-                "source_id": uri,
-                "document_id": clean_uri,
-            }
-
-        # 1. Statute Provision (SFS)
-        if re.search(r"lagen\.nu/\d{4}:\d+", clean_uri):
-            return self._resolve_statute(doc, clean_uri, fragment, citation)
-
-        # 2. Proposition, SOU, Ds and committee directive: cited pages
-        if re.search(r"lagen\.nu/(?:prop|sou|ds|dir)/", clean_uri):
-            return self._resolve_proposition(doc, clean_uri, fragment, citation)
-
-        # 3. Court Judgment (HD, HFD, AD, etc.)
-        if "lagen.nu/dom" in clean_uri:
-            return self._resolve_judgment(doc, clean_uri, fragment, citation)
-
-        # 4. CJEU (EUR-Lex)
-        if "lagen.nu/celex" in clean_uri or doc.get("doctype") in ["eu_case", "judgment"]:
-            return self._resolve_cjeu(doc, clean_uri, fragment, citation)
-
-        # Default fallback
+            return abstain("source_not_found", "unknown")
         text = extract_node_text(doc.get("structure", []))
         return {
             "status": "ok" if text else "abstain",
@@ -365,204 +480,13 @@ class CitedUnitResolver:
             "document_id": clean_uri,
         }
 
-    def _resolve_statute(self, doc: dict, clean_uri: str, fragment: str, citation: str) -> dict[str, Any]:
+    def _resolve_judgment(self, doc: dict, clean_uri: str, citation: str) -> dict[str, Any]:
         """
-        Statute provision rule (Section 3):
-        - Paragraph (§) with all stycken.
-        - Specific stycke if pinpointed.
-        - Whole act or chapter citation -> abstain("unit_unbounded").
+        A judgment cited as a whole (Section 3): the deciding court's own text only
+        (domskal and domslut), without lower instances, betänkande, headnote and
+        dissent -- or the betänkande the court adopted. lagen.nu has no part
+        fragment for this yet (ferenda#114).
         """
-        if not fragment:
-            return {
-                "status": "abstain",
-                "abstain_reason": "unit_unbounded",
-                "text": "",
-                "unit_type": "statute_act",
-                "citation": citation,
-                "source_id": clean_uri,
-                "document_id": clean_uri,
-            }
-
-        # Chapter-only reference e.g. K1, K18
-        if re.match(r"^K\d+$", fragment):
-            return {
-                "status": "abstain",
-                "abstain_reason": "unit_unbounded",
-                "text": "",
-                "unit_type": "statute_chapter",
-                "citation": citation,
-                "source_id": f"{clean_uri}#{fragment}",
-                "document_id": clean_uri,
-            }
-
-        structure = doc.get("structure", [])
-
-        # Parse target paragraph and optional stycke
-        p_match = re.search(r"P(\d+[a-z]*)", fragment)
-        s_match = re.search(r"S(\d+)", fragment)
-
-        target_p_id = f"P{p_match.group(1)}" if p_match else None
-        target_s_id = f"S{s_match.group(1)}" if s_match else None
-        # A current ferenda artifact qualifies the node id by its chapter ("K6P4", "K6P4S1").
-        full_match = re.match(r"(?:K\d+[a-z]?)?P\d+[a-z]*", fragment)
-        full_p_id = full_match.group(0) if full_match else None
-
-        matched_p_node = None
-        matched_s_node = None
-
-        def search_statute(node):
-            nonlocal matched_p_node, matched_s_node
-            if isinstance(node, dict):
-                node_id = node.get("id") or ""
-                # Match paragraph
-                if target_p_id and (node_id == full_p_id or node_id == target_p_id or node_id.endswith(f"_{target_p_id}") or target_p_id in node_id.split("_")):
-                    matched_p_node = node
-                    if target_s_id:
-                        for child in node.get("children", []):
-                            child_id = child.get("id") or ""
-                            if child_id == f"{full_p_id}{target_s_id}" or target_s_id in child_id:
-                                matched_s_node = child
-                                return
-                    return
-                # Look inside children
-                for c in node.get("children", []):
-                    search_statute(c)
-                    if matched_p_node and (not target_s_id or matched_s_node):
-                        return
-            elif isinstance(node, list):
-                for item in node:
-                    search_statute(item)
-                    if matched_p_node and (not target_s_id or matched_s_node):
-                        return
-
-        search_statute(structure)
-
-        if target_s_id and matched_s_node:
-            text = extract_node_text(matched_s_node)
-            return {
-                "status": "ok" if text else "abstain",
-                "abstain_reason": None if text else "pinpoint_not_found",
-                "text": text,
-                "unit_type": "statute_stycke",
-                "citation": citation,
-                "source_id": f"{clean_uri}#{fragment}",
-                "document_id": clean_uri,
-            }
-
-        if matched_p_node:
-            # Paragraph with all stycken
-            text_parts = []
-            beteckning = matched_p_node.get("beteckning", "")
-            for child in matched_p_node.get("children", []):
-                child_text = extract_node_text(child)
-                if child_text:
-                    text_parts.append(child_text)
-            if not text_parts:
-                t = extract_node_text(matched_p_node)
-                if t:
-                    text_parts.append(t)
-            full_text = "\n\n".join(text_parts).strip()
-            if beteckning and not full_text.startswith(beteckning):
-                full_text = f"{beteckning} {full_text}"
-
-            return {
-                "status": "ok" if full_text else "abstain",
-                "abstain_reason": None if full_text else "pinpoint_not_found",
-                "text": full_text,
-                "unit_type": "statute_provision",
-                "citation": citation,
-                "source_id": f"{clean_uri}#{fragment}",
-                "document_id": clean_uri,
-            }
-
-        return {
-            "status": "abstain",
-            "abstain_reason": "pinpoint_not_found",
-            "text": "",
-            "unit_type": "statute_provision",
-            "citation": citation,
-            "source_id": f"{clean_uri}#{fragment}",
-            "document_id": clean_uri,
-        }
-
-    def _resolve_proposition(self, doc: dict, clean_uri: str, fragment: str, citation: str) -> dict[str, Any]:
-        """
-        Proposition rule (Section 3):
-        - Cited page (#sid25) or page range.
-        - Every node whose 'page' equals cited page.
-        """
-        # "prop_page", "sou_page", "ds_page" or "dir_page"
-        kind = re.search(r"lagen\.nu/(prop|sou|ds|dir)/", clean_uri).group(1)
-        page_num = None
-        sid_match = re.search(r"sid(\d+)", fragment) or re.search(r"s\.\s*(\d+)", citation)
-        if sid_match:
-            page_num = int(sid_match.group(1))
-        # "s. 83 f." means pages 83-84, "s. 83 ff." the following pages as well.
-        following = re.search(r"\bs\.\s*\d+\s*(ff?)\b\.?", citation)
-        extra_pages = {"f": 1, "ff": 2}.get(following.group(1), 0) if following else 0
-
-        if page_num is None:
-            return {
-                "status": "abstain",
-                "abstain_reason": "unit_unbounded",
-                "text": "",
-                "unit_type": f"{kind}_whole",
-                "citation": citation,
-                "source_id": clean_uri,
-                "document_id": clean_uri,
-            }
-
-        structure = doc.get("structure", [])
-        page_nodes = []
-
-        wanted_pages = set(range(page_num, page_num + extra_pages + 1))
-
-        def collect_pages(node):
-            # Each node contributes its own text only; a section that starts on
-            # the page must not drag in the pages of all its children.
-            if isinstance(node, dict):
-                if node.get("page") in wanted_pages:
-                    page_nodes.append(node)
-                for c in node.get("children", []):
-                    collect_pages(c)
-            elif isinstance(node, list):
-                for item in node:
-                    collect_pages(item)
-
-        collect_pages(structure)
-        text = "\n\n".join(filter(None, (own_text(n) for n in page_nodes))).strip()
-
-        return {
-            "status": "ok" if text else "abstain",
-            "abstain_reason": None if text else "pinpoint_not_found",
-            "text": text,
-            "unit_type": f"{kind}_page",
-            "citation": citation,
-            "source_id": f"{clean_uri}#sid{page_num}",
-            "document_id": clean_uri,
-        }
-
-    def _resolve_judgment(self, doc: dict, clean_uri: str, fragment: str, citation: str) -> dict[str, Any]:
-        """
-        HD / HFD judgment rule (Section 3):
-        - With pinpoint (p. 7, punkt 7): stycke node with that ordinal under deciding court's dom > domskal.
-        - Without pinpoint: deciding court's own text only (domskal and domslut).
-          Excludes lower instances (instans), betankande, and headnote.
-        """
-        # Determine pinpoint paragraph numbers if any
-        pinpoints: list[int] = []
-        p_match = re.search(r"p(?:unkt)?\s*(\d+)(?:\s*(?:och|–|-)\s*(\d+))?", citation, re.IGNORECASE)
-        if p_match:
-            start_p = int(p_match.group(1))
-            end_p = int(p_match.group(2)) if p_match.group(2) else start_p
-            pinpoints = list(range(start_p, end_p + 1))
-        elif fragment:
-            frag_match = re.search(r"p(\d+)(?:-(\d+))?", fragment)
-            if frag_match:
-                start_p = int(frag_match.group(1))
-                end_p = int(frag_match.group(2)) if frag_match.group(2) else start_p
-                pinpoints = list(range(start_p, end_p + 1))
-
         # Find deciding court instans
         # Court is read from doc or URI: /dom/nja/ -> Högsta domstolen; /dom/hfd/ -> Högsta förvaltningsdomstolen
         court_name = doc.get("court_namn")
@@ -584,36 +508,6 @@ class CitedUnitResolver:
         # deciding court's instans, and a betänkande carries its own numbered
         # paragraphs. Only the deciding court's own dom node is evidence.
         search_roots = deciding_dom_nodes(search_roots)
-
-        # Case 1: Pinpointed paragraph(s)
-        if pinpoints:
-            matched_nodes = []
-            def search_ordinals(node):
-                if isinstance(node, dict):
-                    ord_val = node.get("ordinal")
-                    try:
-                        if ord_val is not None and int(ord_val) in pinpoints:
-                            matched_nodes.append(node)
-                    except (ValueError, TypeError):
-                        pass
-                    for c in node.get("children", []):
-                        search_ordinals(c)
-                elif isinstance(node, list):
-                    for item in node:
-                        search_ordinals(item)
-
-            search_ordinals(search_roots)
-            text = "\n\n".join(filter(None, (extract_node_text(n) for n in matched_nodes))).strip()
-            source_id = f"{clean_uri}#p{pinpoints[0]}" + (f"-{pinpoints[-1]}" if len(pinpoints) > 1 else "")
-            return {
-                "status": "ok" if text else "abstain",
-                "abstain_reason": None if text else "pinpoint_not_found",
-                "text": text,
-                "unit_type": "case_pinpoint",
-                "citation": citation,
-                "source_id": source_id,
-                "document_id": clean_uri,
-            }
 
         # Case 2: Blanket citation - deciding court's domskal and domslut only
         domskal_nodes = []
@@ -658,55 +552,12 @@ class CitedUnitResolver:
             "document_id": clean_uri,
         }
 
-    def _resolve_cjeu(self, doc: dict, clean_uri: str, fragment: str, citation: str) -> dict[str, Any]:
+    def _resolve_cjeu(self, doc: dict, clean_uri: str, citation: str) -> dict[str, Any]:
         """
-        CJEU judgment rule (Section 3):
-        - Pinpointed (punkt 45, p. 45): numbered paragraph.
-        - Blanket: court's assessment (Prövning av tolkningsfrågan up to Rättegångskostnader).
+        A CJEU judgment cited as a whole (Section 3): the court's assessment
+        (Prövning av tolkningsfrågan up to Rättegångskostnader).
         """
-        # Determine pinpoint number if any
-        pinpoints: list[int] = []
-        p_match = (re.search(r"\bp(?:unkt(?:erna)?)?\.?\s*(\d+)(?:\s*(?:och|–|-|,)\s*(\d+))?", citation, re.IGNORECASE)
-                   or re.search(r"p(\d+)(?:-(\d+))?", fragment))
-        if p_match:
-            start_p = int(p_match.group(1))
-            end_p = int(p_match.group(2)) if p_match.group(2) else start_p
-            if start_p <= end_p <= start_p + 10:
-                pinpoints = list(range(start_p, end_p + 1))
-            else:
-                pinpoints = [start_p]
-        p_num = pinpoints[0] if pinpoints else None
-
         structure = doc.get("structure", [])
-
-        if p_num is not None:
-            matched = []
-            def find_cjeu_p(node):
-                if isinstance(node, dict):
-                    num_val = node.get("num") or node.get("ordinal")
-                    try:
-                        if num_val is not None and int(num_val) in pinpoints:
-                            matched.append(node)
-                    except (ValueError, TypeError):
-                        pass
-                    for c in node.get("children", []):
-                        find_cjeu_p(c)
-                elif isinstance(node, list):
-                    for item in node:
-                        find_cjeu_p(item)
-
-            find_cjeu_p(structure)
-            text = "\n\n".join(filter(None, (extract_node_text(n) for n in matched))).strip()
-            source_id = f"{clean_uri}#p{p_num}" + (f"-{pinpoints[-1]}" if len(pinpoints) > 1 else "")
-            return {
-                "status": "ok" if text else "abstain",
-                "abstain_reason": None if text else "pinpoint_not_found",
-                "text": text,
-                "unit_type": "cjeu_pinpoint",
-                "citation": citation,
-                "source_id": source_id,
-                "document_id": clean_uri,
-            }
 
         # Blanket citation: assessment section
         # The judgment proper sits under the level-1 heading "Dom"; everything
