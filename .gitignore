@@ -12,3 +12,8 @@ Eskilstuna TR T 667-25*.pdf
 # Local artifact cache & model checkpoints
 backend/.artifact_cache/
 models/
+
+# Thesis training data: committed as data/thesises-training.partN.jsonl (GitHub refuses files over 100 MB);
+# the joined file and the lagen.nu answer cache stay local
+data/thesises-training.jsonl
+data/*.api-cache.json
