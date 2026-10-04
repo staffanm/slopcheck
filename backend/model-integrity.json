@@ -42,5 +42,27 @@
       "bytes": 538,
       "sha256": "e056ef0cbb03d59dc1d0144cba52b091a6ed68c4e291c6c8caa59e72ac5d9ba7"
     }
+  },
+  "classifier-megatron-large-4way-v2": {
+    "calibration.json": {
+      "bytes": 3369,
+      "sha256": "0293b3e559988dc540ed626c5c8a8ef3ccc8aa3a00a4746b29387d246467ce4d"
+    },
+    "config.json": {
+      "bytes": 1052,
+      "sha256": "1c6bf92d134c954597362de26e49500fd3987cd64debd961783e71aa868fcfc0"
+    },
+    "model_quantized.onnx": {
+      "bytes": 371272819,
+      "sha256": "f0e6c7181ee26bb4f9f6f94a6e530d4b401d3c4169c1d3c5aec7fefec28ffc28"
+    },
+    "tokenizer.json": {
+      "bytes": 1417946,
+      "sha256": "417aa47cb0676c441b1ad042bd1afdec680d88468b2dc4b7d305bf6eea2f79b5"
+    },
+    "tokenizer_config.json": {
+      "bytes": 538,
+      "sha256": "e056ef0cbb03d59dc1d0144cba52b091a6ed68c4e291c6c8caa59e72ac5d9ba7"
+    }
   }
 }

@@ -152,6 +152,8 @@ def main() -> None:
     parser.add_argument("--no-wilson", action="store_true")
     parser.add_argument("--target-precision", action="append", default=[], metavar="CLASS=VALUE",
                         help="Override a class's target precision, e.g. supported=0.90. Repeatable.")
+    parser.add_argument("--fixed-threshold", action="append", default=[], metavar="CLASS=VALUE",
+                        help="Use this probability threshold for a class instead of the selected one, e.g. supported=0.80. Repeatable.")
     parser.add_argument("--threads", type=int, default=8)
     parser.add_argument("--mode", choices=["window", "chunks"], default="window",
                         help="window: one BM25 window per claim (default); chunks: score every chunk and pool.")
@@ -180,6 +182,12 @@ def main() -> None:
         minimum_accepted=args.minimum_accepted, use_wilson_lower_bound=not args.no_wilson, wilson_slack=args.wilson_slack,
     )
     thresholds = selection["thresholds"]
+    fixed = {}
+    for override in args.fixed_threshold:
+        class_name, value = override.split("=")
+        if class_name not in thresholds:
+            parser.error(f"unknown class {class_name!r} in --fixed-threshold")
+        fixed[class_name] = thresholds[class_name] = float(value)
     minimum_margin = selection["minimum_margin"]
     print(f"Temperature {temperature:.4f}; thresholds {thresholds}; margin {minimum_margin}")
     for class_name, metrics in selection["class_metrics"].items():
@@ -194,6 +202,7 @@ def main() -> None:
         "ece_before": round(expected_calibration_error(softmax(cal_logits, 1.0), cal_targets), 4),
         "ece_after": round(expected_calibration_error(cal_probs, cal_targets), 4),
         "target_precisions": target_precisions,
+        "fixed_thresholds": fixed,
         "calibration_rows": int(len(cal_targets)),
         "logits_source": "model_quantized.onnx via backend.model.ClaimClassifier",
         "selection": selection,
