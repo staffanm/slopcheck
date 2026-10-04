@@ -40,8 +40,7 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_
 from scripts.train_kb_bert import ID2LABEL, LABEL2ID, WindowedLegalDataset, evaluate
 
 CORPUS = ["data/train.audited.jsonl", "data/validation.audited.jsonl", "data/calibration.audited.jsonl",
-          "data/test.audited.jsonl", "data/train.rewrites.jsonl", "data/train.neighbours.jsonl",
-          "data/train.chunks.jsonl", "data/validation.chunks.jsonl"]
+          "data/test.audited.jsonl", "data/train.rewrites.jsonl"]
 
 
 def token_counts(tokenizer) -> Counter:
@@ -124,8 +123,8 @@ class PairCollate:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--teacher-dir", type=Path, default=Path("models/classifier-kb-bert-4way-v5"))
-    parser.add_argument("--train-data", default="data/train.chunks.jsonl")
-    parser.add_argument("--val-data", default="data/validation.chunks.jsonl")
+    parser.add_argument("--train-data", nargs="+", default=["data/train.audited.jsonl", "data/train.rewrites.jsonl"])
+    parser.add_argument("--val-data", nargs="+", default=["data/validation.audited.jsonl"])
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--init-dir", type=Path, default=None, help="Cut the student down from this model (default: the teacher).")
     parser.add_argument("--student-model", default=None, help="Distil into this model instead of a cut-down teacher.")

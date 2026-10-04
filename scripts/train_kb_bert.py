@@ -55,25 +55,25 @@ def header_variants(sources: list[dict]) -> list[list[dict]]:
 
 
 class WindowedLegalDataset(Dataset):
-    def __init__(self, data_path: Path | str, tokenizer: Any, max_premise_tokens: int = 380, augment_headers: bool = False):
+    def __init__(self, data_paths: list[Path | str], tokenizer: Any, max_premise_tokens: int = 380, augment_headers: bool = False):
         self.examples = []
         self.augment_headers = augment_headers
-        with open(data_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                row = json.loads(line)
-                sources = row.get("sources") or ([row["source"]] if "source" in row else [])
-                claim = row["claim"]
-                variants = header_variants(sources) if augment_headers else [sources]
-                premises = [window_premise(claim, v, max_premise_tokens=max_premise_tokens, tokenizer=tokenizer) for v in variants]
-                self.examples.append({
-                    "premises": premises,
-                    "hypothesis": claim,
-                    "label": LABEL2ID[row["label"]],
-                    "id": row.get("id", "")
-                })
+        lines = [line for path in data_paths for line in open(path, "r", encoding="utf-8")]
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            sources = row.get("sources") or ([row["source"]] if "source" in row else [])
+            claim = row["claim"]
+            variants = header_variants(sources) if augment_headers else [sources]
+            premises = [window_premise(claim, v, max_premise_tokens=max_premise_tokens, tokenizer=tokenizer) for v in variants]
+            self.examples.append({
+                "premises": premises,
+                "hypothesis": claim,
+                "label": LABEL2ID[row["label"]],
+                "id": row.get("id", "")
+            })
 
     def __len__(self):
         return len(self.examples)
@@ -176,8 +176,8 @@ def evaluate(model, dataloader, device, loss_fct=None):
 def main():
     parser = argparse.ArgumentParser(description="Fine-tune KB/bert-base-swedish-cased for claim classification.")
     parser.add_argument("--model-name", type=str, default="KB/bert-base-swedish-cased")
-    parser.add_argument("--train-data", type=str, default="data/train.jsonl")
-    parser.add_argument("--val-data", type=str, default="data/validation.jsonl")
+    parser.add_argument("--train-data", nargs="+", default=["data/train.audited.jsonl", "data/train.rewrites.jsonl"])
+    parser.add_argument("--val-data", nargs="+", default=["data/validation.audited.jsonl"])
     parser.add_argument("--output-dir", type=str, default="models/classifier-kb-bert-4way")
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--lr", type=float, default=2e-5)
@@ -190,6 +190,8 @@ def main():
                         help="Train only on the citation header, not also on unit-type and generic headers.")
     parser.add_argument("--gradient-checkpointing", action="store_true",
                         help="Recompute activations in the backward pass, so a large model fits in GPU memory.")
+    parser.add_argument("--class-weighting", choices=["inverse", "sqrt", "none"], default="inverse",
+                        help="Loss weight per class: inverse frequency, its square root, or none (largest class 1).")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -234,9 +236,10 @@ def main():
     print(f"Batch size: {args.batch_size}, Grad accum: {args.grad_accum} (Effective batch: {effective_batch})")
     print(f"Total optimization steps: {total_steps}, Warmup steps: {warmup_steps}")
 
-    # Inverse-frequency class weights, scaled so the largest class has weight 1
+    # Class weights from inverse frequency (or its square root), scaled so the largest class has weight 1
     label_counts = Counter(example["label"] for example in train_dataset.examples)
-    weights = [max(label_counts.values()) / max(label_counts.get(i, 1), 1) for i in range(4)]
+    power = {"inverse": 1.0, "sqrt": 0.5, "none": 0.0}[args.class_weighting]
+    weights = [(max(label_counts.values()) / max(label_counts.get(i, 1), 1)) ** power for i in range(4)]
     print("Class weights:", {ID2LABEL[i]: round(w, 3) for i, w in enumerate(weights)})
     class_weights = torch.tensor(weights, device=device, dtype=torch.float32)
     loss_fct = torch.nn.CrossEntropyLoss(weight=class_weights)
@@ -314,6 +317,7 @@ def main():
                 "git_commit": subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip(),
                 "train_rows": len(train_dataset),
                 "train_label_counts": {ID2LABEL[i]: label_counts.get(i, 0) for i in range(4)},
+                "class_weighting": args.class_weighting,
                 "header_augmentation": not args.no_header_augmentation,
                 "best_epoch": epoch,
                 "best_macro_f1": best_macro_f1,
