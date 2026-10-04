@@ -43,9 +43,11 @@ CORPUS = ["data/train.audited.jsonl", "data/validation.audited.jsonl", "data/cal
           "data/test.audited.jsonl", "data/train.rewrites.jsonl"]
 
 
-def token_counts(tokenizer) -> Counter:
+def token_counts(tokenizer, files=()) -> Counter:
+    """Token counts over CORPUS, the given files (the training and validation data) and the
+    fixture sources; each distinct text counts once."""
     texts = set()
-    for path in CORPUS:
+    for path in dict.fromkeys([*CORPUS, *map(str, files)]):
         for line in open(path, encoding="utf-8"):
             row = json.loads(line)
             texts.add(row["claim"])
@@ -60,12 +62,12 @@ def token_counts(tokenizer) -> Counter:
     return counts
 
 
-def pruned_tokenizer(teacher_dir: Path, min_count: int, out_dir: Path):
+def pruned_tokenizer(teacher_dir: Path, min_count: int, out_dir: Path, files=()):
     """Writes a WordPiece tokenizer with the kept vocabulary to out_dir and returns it with the
     teacher ids of its tokens, in the new id order. Kept tokens keep their relative order, so
     the special tokens (ids 0-4) keep their ids."""
     teacher_tok = AutoTokenizer.from_pretrained(str(teacher_dir))
-    counts = token_counts(teacher_tok)
+    counts = token_counts(teacher_tok, files)
     spec = json.loads((teacher_dir / "tokenizer.json").read_text(encoding="utf-8"))
     vocab = spec["model"]["vocab"]
     special = {token["id"] for token in spec["added_tokens"]}
@@ -151,7 +153,7 @@ def main():
     else:
         init_dir = args.init_dir or args.teacher_dir
         init = teacher if init_dir == args.teacher_dir else AutoModelForSequenceClassification.from_pretrained(str(init_dir))
-        student_tok, keep = pruned_tokenizer(init_dir, args.min_token_count, args.output_dir)
+        student_tok, keep = pruned_tokenizer(init_dir, args.min_token_count, args.output_dir, [*args.train_data, *args.val_data])
         student, picked = student_model(init, keep, args.layers)
     student.to(device)
     params = sum(p.numel() for p in student.parameters())

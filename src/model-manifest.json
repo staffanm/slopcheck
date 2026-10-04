@@ -1,6 +1,6 @@
 {
-  "model": "models/classifier-kb-bert-4way-student-l4",
-  "version": "kb-bert-student-l4-v6-q4",
+  "model": "models/classifier-kb-bert-4way-student-l4-m2",
+  "version": "kb-bert-student-l4-m2-q4",
   "license": "26 a § upphovsrättslagen (1960:729) är tillämplig",
   "quantization": "4-bit weights (MatMulNBits, GatherBlockQuantized, block 128), float32 activations",
   "premise": "window",
@@ -12,25 +12,25 @@
     "misleading"
   ],
   "calibration": {
-    "temperature": 2.1561,
-    "minimum_margin": 0.0,
+    "temperature": 1.0422,
+    "minimum_margin": 0.15,
     "thresholds": {
-      "supported": 0.6864,
-      "unsupported": 0.8165,
+      "supported": 0.78,
+      "unsupported": 0.8715,
       "incorrect": 1.01,
       "misleading": 1.01
     },
-    "calibration_rows": 543,
-    "policy": "fail-closed, target precision per label as in scripts/calibrate_onnx.py; above 1 disables a label"
+    "calibration_rows": 1940,
+    "policy": "fail-closed, target precision per label as in scripts/calibrate_onnx.py, supported fixed at 0.78 so that paraphrased and derived claims abstain; above 1 disables a label"
   },
   "files": {
     "model.onnx": {
-      "bytes": 24746373,
-      "sha256": "19369e6279620a9a891efb4ae19fc5ab27d4ea5671bf8c24e448f624a82d9131"
+      "bytes": 24541963,
+      "sha256": "03f187c177b25261e5a5c1e1884eee16fb1aae5e7252f999f43e6b1ee18a9190"
     },
     "tokenizer.json": {
-      "bytes": 396290,
-      "sha256": "ecdc94e8ca54c85fd27412346e1c3a6f197a61d3db0448ea8b7bdd09275183f2"
+      "bytes": 385071,
+      "sha256": "b7edc2014f87166aec2c5f3a4cf1824d2d62a4a00864536988ba2da94f2e5cc0"
     },
     "tokenizer_config.json": {
       "bytes": 571,
@@ -38,7 +38,7 @@
     },
     "config.json": {
       "bytes": 961,
-      "sha256": "156bebd13903c6d0664129796cb6ccd08807c17c117d44fab8db2d26b724f916"
+      "sha256": "6776fdd12b36d5595b093ca1649b841c03c572e9e9150b5eb73d5cf0a621b6ea"
     }
   }
 }

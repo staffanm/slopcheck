@@ -1,13 +1,15 @@
-Privacy mode: kb-bert-student-l4-v6-q4
+Privacy mode: kb-bert-student-l4-m2-q4
 Based on KB/bert-base-swedish-cased — Kungliga biblioteket (KB)
 Original: https://huggingface.co/KB/bert-base-swedish-cased
 License: 26 a § upphovsrättslagen (1960:729) är tillämplig
 
 slopcheck fine-tunes the original weights as a four-label claim classifier,
 keeps 4 of its 12 layers and the part of its vocabulary that legal Swedish
-uses, and distils the result from its own larger classifier. The weights are
-exported to ONNX with 4-bit matrix weights and embeddings; activations remain
-float32. KB does not endorse slopcheck or its legal assessment labels.
+uses, and distils the result from slopcheck's server classifier, itself
+fine-tuned from KBLab/megatron-bert-large-swedish-cased-165-zero-shot (KB,
+https://huggingface.co/KBLab/megatron-bert-large-swedish-cased-165-zero-shot).
+The weights are exported to ONNX with 4-bit matrix weights and embeddings;
+activations remain float32. KB does not endorse slopcheck or its legal assessment labels.
 
 Earlier privacy-mode models: ScandiNLI small — Alexandra Institute
 Original: https://huggingface.co/alexandrainst/scandi-nli-small

@@ -217,7 +217,7 @@ same four labels as the server: supported, unsupported, incorrect, misleading. I
 the server model: [KB-BERT](https://huggingface.co/KB/bert-base-swedish-cased) cut to 4 of its 12
 layers and to the vocabulary that legal Swedish uses, distilled from the server's classifier
 (`scripts/distill_kb_bert.py`) and exported with 4-bit weights (`scripts/export_student.py`). The
-model and tokenizer total 25.1 MB. The ONNX browser runtime adds about 28.3 MB before HTTP
+model and tokenizer total 24.9 MB. The ONNX browser runtime adds about 28.3 MB before HTTP
 compression. The manifest carries the labels and the calibration; the label policy is the
 server's (`fourLabelResult` in `src/semantic.js`).
 Serve `.wasm` as `application/wasm`; enable gzip or Brotli for static assets.
